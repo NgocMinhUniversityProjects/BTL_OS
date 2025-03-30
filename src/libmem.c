@@ -1,3 +1,8 @@
+//change list 31/3/2025 - Minh: 
+//  + implemented(?) get_free_vmrg_area, 
+//  + added comments in __alloc
+//
+
 /*
  * Copyright (C) 2025 pdnguyen of HCMC University of Technology VNU-HCM
  */
@@ -68,11 +73,25 @@ struct vm_rg_struct *get_symrg_byid(struct mm_struct *mm, int rgid)
  */
 int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr)
 {
+  // [ 31/03/2025 - Minh ]
+  //the problem: each memory area starts at vm_start, ends at vm_ends
+  //however, in the middle, we have chunks called vm_rg, which is used and cannot be given to programs
+  //the free regions therefore, is segmented
+  //free regions list is captured in the struct vm_freerg_list
+
+  //our task here, is to 
+  //1. find the next free region
+  //2. try to allocate it
+  // if fail 1 : no free region in list --> syscall meminc
+  // if fail 2 : limit reached (free region recceived at NEWLIMIT) --> attemt to increase limit
+  // more comment below by teach
+
   /*Allocate at the toproof */
   struct vm_rg_struct rgnode;
 
   /* TODO: commit the vmaid */
-  // rgnode.vmaid
+  //convert the vmaid into mem area
+  //vmaid is the id
 
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
   {
@@ -137,7 +156,9 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
     return -1;
 
   /* TODO: Manage the collect freed region to freerg_list */
+  struct vm_rg_struct * rgnode;
   
+
 
   /*enlist the obsoleted memory region */
   //enlist_vm_freerg_list();
@@ -445,8 +466,9 @@ int find_victim_page(struct mm_struct *mm, int *retpgn)
  *@caller: caller
  *@vmaid: ID vm area to alloc memory region
  *@size: allocated size
- *
+ *returns 0 if success, -1 if fail
  */
+// modified on 31/03/2025 by Minh
 int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_struct *newrg)
 {
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
@@ -462,8 +484,78 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
   /* TODO Traverse on list of free vm region to find a fit space */
   //while (...)
   // ..
-
+  struct vm_rg_struct ** runner = &rgit;
+  pthread_mutex_lock(&mmvm_lock);
+  return get_free_helper_best_fit(runner, size, newrg);
   return 0;
+}
+
+// modified on 31/03/2025 by Minh
+//helper func
+int get_free_helper_first_fit(
+  struct vm_rg_struct ** runner, 
+  int size, struct 
+  vm_rg_struct *target
+){
+  if(runner == NULL || *runner == NULL) return -1;
+  while(*runner){
+    //first fit algo
+    struct vm_rg_struct * c = *runner;
+    int s = c->rg_end - c->rg_start + 1;
+    if(s >= size){
+      target->rg_start = c->rg_start;
+      target->rg_end = target->rg_start + size;
+      //remove from free list
+      c->rg_start = c->rg_end + 1;
+      if(c->rg_start > c->rg_end){
+        //cut (c) out of list
+        struct vm_rg_struct * d = c->rg_next;
+        //I actually have no clue what the heck to do here
+        //normally i would call delete c
+        //but in this context, that would mean putting the region 
+        //previously occupied by c into free list again
+        //that makes no sense tbh, the system mem would decreases
+        //ahhhh
+        //edit: call free?
+        free(c);
+        *runner = d;
+        return 0;
+      }
+    }
+    runner = &((*runner)->rg_next);
+  }
+  return -1;
+}
+
+int get_free_helper_best_fit(
+  struct vm_rg_struct ** runner, 
+  int size, struct 
+  vm_rg_struct *target
+){
+  if(runner == NULL || *runner == NULL) return -1;
+  struct vm_rg_struct ** bestRunner = NULL;
+  struct vm_rg_struct * c = *runner;
+  while(*runner){
+    //best fit algo
+    struct vm_rg_struct * c = *runner;
+    int s = c->rg_end - c->rg_start + 1;
+    if(s >= size) bestRunner = runner;
+    runner = &((*runner)->rg_next);
+  }
+  if(bestRunner == NULL) return -1;
+  c = *bestRunner;
+  target->rg_start = c->rg_start;
+  target->rg_end = target->rg_start + size;
+  //remove from free list
+  c->rg_start = c->rg_end + 1;
+  if(c->rg_start > c->rg_end){
+    //cut (c) out of list
+    struct vm_rg_struct * d = c->rg_next;
+    free(c);
+    *runner = d;
+    return 0;
+  }
+  return -1;
 }
 
 //#endif
