@@ -1,8 +1,3 @@
-//change list 31/3/2025 - Minh: 
-//  + implemented(?) get_free_vmrg_area, 
-//  + added comments in __alloc
-//
-
 /*
  * Copyright (C) 2025 pdnguyen of HCMC University of Technology VNU-HCM
  */
@@ -18,6 +13,116 @@
  * System Library
  * Memory Module Library libmem.c 
  */
+
+//change list 31/3/2025 - Minh: 
+//  + implemented(?) get_free_vmrg_area, 
+//  + added comments in __alloc
+//
+
+//change list 2/4/2025 - Minh:
+// + implemented 80% of __alloc
+// + implemented (?) __free
+// + fixxed a bug in best_fit
+// + moved pthread lock to the begin of __alloc
+// + added detailed comments about specifications (below)
+
+/* Note on specification: 
+
+# Distinguish between memory region and memory area
+
+we are building a virtual memory allocator library
+we want each process THINKS it has multiple memory area next to each other (code, stack, etc)
+there are VIRTUAL memory, aka, its addresses are virtual addresses
+
+vm_area_struct has start and end pointer, these pointers are VIRTUAL boundaries
+however, we further limit the usable within this area up to the sbrk, NOT vm_end
+
+I think we do not need to care how virtual is mappped to physical ram
+cause thats is in mm_vm_c
+and is done through syscalls
+
+we here provides a library for mem.c to interact with
+
+tldr:
+memory area >  memory region
+a memory area contains many memory regions
+
+crucially, the struct for area DO NOT have a list of all regions it has
+it only has a list of the free ones
+
+
+# Distinguish between page and frame
+
+our virtual memory is segmented into pages
+the actual physcial memory is segmented into frames
+we have a map from pages to frames handled in a page table
+
+# Mapping process handler
+
+each process has a mm_struct inside that handles this virtual -> physical mapping 
+
+mm_struct has 4 parts : 
+
+pgd : <physical memory address> 
+  address of the start of this process's page table
+  used for virtual -> physical mapping
+
+mmap : <linked list> 
+  a big linked list of every memory areas of this process
+
+symrgtbl : <array of 30 memory regions reserved to represent namespaces>
+  we allow a maximum of 30 namespaces per process
+  each namespace is 1 region
+
+fifo_page : <the next page if fifo is used for page swap>
+  <currently unused, teach reccoment use for page swapping, but we can also not use this>
+
+# Explains every functions in this file: (unfinished note)
+
+enlist_vm_freerg_list: (teach implement)
+  add a region to the free region list of the first area in the given manager
+  add to top
+  return -1 if invalid region, 0 if successful
+
+  however, 1 potential bug(?) i noticed is that it only fix the link if the free list isnt null
+  consequence is if we invoke this function with a already linked region
+  aka, the passed in region is linked to something else
+  it will only break this link if the free list is not null
+  leading to...potentially adding multiple regions to the free list at once
+  dont know if this is a bug or a feature honestly
+
+get_symrg_byid: (teach implement)
+  get a symbol by symbol index (id)
+  returns null if invalid index
+
+__alloc: (we implement)
+  the caller wants to allocate a memory with size <size> to the symbol <rgid> 
+  in region <rgid> in area <vmaid>
+  params:
+    <pcb data> caller
+    <memory area id> vmaid
+    <memory region id> rgid
+    size
+    
+    
+    <change this to the start of the allocated address> alloc_addr
+
+  progress: 80%, problem with syscall 17 rn
+
+__free: (we implement)  
+  adds a region to freerg list
+
+liballoc: wrapper to call __alloc on virtual area 0 (guess)
+libfree: wrapper to call __free on virtual area 0 (guess)
+  
+
+
+get_free_vmrg_area (we implement) (implemented?)
+  
+
+
+*/
+
 
 #include "string.h"
 #include "mm.h"
@@ -39,7 +144,7 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
   struct vm_rg_struct *rg_node = mm->mmap->vm_freerg_list;
 
   if (rg_elmt->rg_start >= rg_elmt->rg_end)
-    return -1;
+    return -1; //invalid reagion?
 
   if (rg_node != NULL)
     rg_elmt->rg_next = rg_node;
@@ -83,7 +188,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   //1. find the next free region
   //2. try to allocate it
   // if fail 1 : no free region in list --> syscall meminc
-  // if fail 2 : limit reached (free region recceived at NEWLIMIT) --> attemt to increase limit
+  // if fail 2 : limit reached (free region recceived at NEWLIMIT) --> attempt to increase limit
   // more comment below by teach
 
   /*Allocate at the toproof */
@@ -93,6 +198,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   //convert the vmaid into mem area
   //vmaid is the id
 
+  pthread_mutex_lock(&mmvm_lock);
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
   {
     caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
@@ -108,31 +214,51 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
   /* TODO retrive current vma if needed, current comment out due to compiler redundant warning*/
   /*Attempt to increate limit to get space */
-  //struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
+  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
-
-  //int inc_sz = PAGING_PAGE_ALIGNSZ(size);
-  //int inc_limit_ret;
+  int inc_sz = PAGING_PAGE_ALIGNSZ(size);
+  //note: inc_sz is passed below to system call to increase the size
+  //buttt in mm-vm.c the size is alligned AGAIN
+  //thus this is redundant
+  //ima keep it in cause its teach's code but ehhhh
+  //may be removable
+  int inc_limit_ret;
 
   /* TODO retrive old_sbrk if needed, current comment out due to compiler redundant warning*/
-  //int old_sbrk = cur_vma->sbrk;
+  int old_sbrk = cur_vma->sbrk;
 
-  /* TODO INCREASE THE LIMIT as inovking systemcall 
+  /* INCREASE THE LIMIT as inovking systemcall 
    * sys_memap with SYSMEM_INC_OP 
    */
-  //struct sc_regs regs;
-  //regs.a1 = ...
-  //regs.a2 = ...
-  //regs.a3 = ...
-  
-  /* SYSCALL 17 sys_memmap */
+  //NOTE: use OUR syscall system
+  //syscall 17 as noted in syscall.tbl is sys_memmap 
+  //a1 - a3 note is taken from sys_mem.c and mm-vm.c
 
-  /* TODO: commit the limit increment */
+  //luckily, not our job here to know how syscall 17 is implemented
+  //its...someone else in the team lmao
+  struct sc_regs regs;
+  regs.a1 =  SYSMEM_INC_OP; //memory operation
+  regs.a2 = vmaid; //vmaid
+  regs.a3 = inc_sz; //increase size
+  
+  // SYSCALL 17 sys_memmap
+  int status = syscall(caller, 17, &regs); 
+  if(status != 0) return status;
+
+  //ok, I have no clue where the allocation is 
+  //its a bunch of unfinished implementation???
+  //commit here means we take whatever the syscall do and apply it
+  //but i dont know how to apply it cause idk where the syscall allocates the new thing?
+
+
+  /* commit the limit increment */
+  
 
   /* TODO: commit the allocation address 
   // *alloc_addr = ...
   */
 
+  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 
 }
@@ -146,7 +272,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
  */
 int __free(struct pcb_t *caller, int vmaid, int rgid)
 {
-  //struct vm_rg_struct rgnode;
+  // struct vm_rg_struct rgnode;
 
   // Dummy initialization for avoding compiler dummay warning
   // in incompleted TODO code rgnode will overwrite through implementing
@@ -155,13 +281,12 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   if(rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
     return -1;
 
-  /* TODO: Manage the collect freed region to freerg_list */
-  struct vm_rg_struct * rgnode;
-  
+  /* Manage the collect freed region to freerg_list */
+  struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
 
 
   /*enlist the obsoleted memory region */
-  //enlist_vm_freerg_list();
+  enlist_vm_freerg_list(caller->mm, rgnode);
 
   return 0;
 }
@@ -485,7 +610,6 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
   //while (...)
   // ..
   struct vm_rg_struct ** runner = &rgit;
-  pthread_mutex_lock(&mmvm_lock);
   return get_free_helper_best_fit(runner, size, newrg);
   return 0;
 }
@@ -535,11 +659,18 @@ int get_free_helper_best_fit(
   if(runner == NULL || *runner == NULL) return -1;
   struct vm_rg_struct ** bestRunner = NULL;
   struct vm_rg_struct * c = *runner;
+  int bestScore = -1;
   while(*runner){
     //best fit algo
     struct vm_rg_struct * c = *runner;
     int s = c->rg_end - c->rg_start + 1;
-    if(s >= size) bestRunner = runner;
+    if(s >= size) {
+      int score = s - size;
+      if(score < bestScore || bestScore == -1) {
+        bestRunner = runner;
+        bestScore = score;
+      }
+    }
     runner = &((*runner)->rg_next);
   }
   if(bestRunner == NULL) return -1;
