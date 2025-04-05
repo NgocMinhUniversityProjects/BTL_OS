@@ -326,6 +326,7 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
  *@caller: caller
  *
  */
+// [ 4/4/2025 - Chung ]
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
   uint32_t pte = mm->pgd[pgn];
@@ -333,10 +334,11 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
   if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
     int vicpgn, swpfpn; 
-    //int vicfpn;
-    //uint32_t vicpte;
 
-    //int tgtfpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
+    uint32_t vicpte = mm->pgd[vicpgn];
+    
+    int vicfpn = PAGING_PTE_FPN(vicpte);
+    int tgtfpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
 
     /* TODO: Play with your paging theory here */
     /* Find victim page */
@@ -352,12 +354,14 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      * SYSCALL 17 sys_memmap 
      * with operation SYSMEM_SWP_OP
      */
-    //struct sc_regs regs;
-    //regs.a1 =...
-    //regs.a2 =...
-    //regs.a3 =..
+    struct sc_regs regs;
+    regs.a1 = SYSMEM_SWP_OP;
+    regs.a2 = vicfpn;
+    regs.a3 = swpfpn;
 
     /* SYSCALL 17 sys_memmap */
+    int status = syscall(caller, 17, &regs);
+    if (status != 0) return status;
 
     /* TODO copy target frame form swap to mem 
      * SWP(tgtfpn <--> vicfpn)
@@ -365,15 +369,17 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      * with operation SYSMEM_SWP_OP
      */
     /* TODO copy target frame form swap to mem 
-    //regs.a1 =...
-    //regs.a2 =...
-    //regs.a3 =..
     */
+   regs.a1 = SYSMEM_SWP_OP
+   regs.a2 = tgtfpn;
+   regs.a3 = vicfpn;
 
     /* SYSCALL 17 sys_memmap */
+    status = syscall(caller, 17, &regs);
+    if (status != 0) return status;
 
     /* Update page table */
-    //pte_set_swap() 
+    // pte_set_swap() 
     //mm->pgd;
 
     /* Update its online status of the target page */
@@ -576,11 +582,19 @@ int free_pcb_memph(struct pcb_t *caller)
  *@pgn: return page number
  *
  */
+// [ 03/04/2025 - Chung ]
 int find_victim_page(struct mm_struct *mm, int *retpgn)
 {
   struct pgn_t *pg = mm->fifo_pgn;
 
   /* TODO: Implement the theorical mechanism to find the victim page */
+
+  if (!pg) {
+    return -1;
+  }
+
+  retpgn = pg->pgn;
+  mm->fifo_pgn = mm->fifo_pgn->pg_next;
 
   free(pg);
 
