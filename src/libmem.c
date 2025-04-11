@@ -252,7 +252,10 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
 
   /* commit the limit increment */
-  
+    
+  caller->mm->symrgtbl[rgid].rg_start = old_sbrk;
+  caller->mm->symrgtbl[rgid].rg_end = old_sbrk+size;
+  *alloc_addr =old_sbrk;
 
   /* TODO: commit the allocation address 
   // *alloc_addr = ...
