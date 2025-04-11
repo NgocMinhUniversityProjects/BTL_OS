@@ -12,6 +12,7 @@
 #include "syscall.h"
 #include "stdio.h"
 #include "libmem.h"
+#include "queue.h" // Add queue lib to traverse the process list
 
 int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
 {
@@ -39,10 +40,42 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
     //caller->running_list
     //caller->mlq_ready_queu
 
+    int killed = 0;
+    // running list
+    for (int i = 0; i < caller->running_list->size; ++i) {
+        struct pcb_t *pcb = dequeue(caller->running_list);
+        if (strcmp(pcb->path, proc_name) == 0) {
+            //printf("Terminating running process: %s (PID: %d)\n", pcb->path, pcb->pid);
+            free_pcb_memph(pcb);
+            killed++;
+        } else {
+            enqueue(caller->running_list, pcb);
+        }
+    }
+
+    // mlq ready queue
+    for (int i = 0; i < caller->mlq_ready_queue->size; ++i) {
+        struct pcb_t *pcb = dequeue(caller->mlq_ready_queue);
+        if (strcmp(pcb->path, proc_name) == 0) {
+            //printf("Terminating queued process: %s (PID: %d)\n", pcb->path, pcb->pid);
+            free_pcb_memph(pcb);
+            killed++;
+        } else {
+            enqueue(caller->mlq_ready_queue, pcb);
+        }
+    }
+
+    //printf("Killed %d processes with name \"%s\"\n", killed, proc_name);
+    //
+    return killed > 0 ? 0 : -1;
+
     /* TODO Maching and terminating 
      *       all processes with given
      *        name in var proc_name
      */
 
-    return 0; 
+     //
+
+    
+    //return 0; 
 }
