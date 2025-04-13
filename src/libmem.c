@@ -216,16 +216,16 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   /*Attempt to increate limit to get space */
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
-  int inc_sz = PAGING_PAGE_ALIGNSZ(size);
+  // int inc_sz = PAGING_PAGE_ALIGNSZ(size);
   //note: inc_sz is passed below to system call to increase the size
   //buttt in mm-vm.c the size is alligned AGAIN
   //thus this is redundant
   //ima keep it in cause its teach's code but ehhhh
   //may be removable
-  int inc_limit_ret;
+  // int inc_limit_ret;
 
   /* TODO retrive old_sbrk if needed, current comment out due to compiler redundant warning*/
-  int old_sbrk = cur_vma->sbrk;
+  // int old_sbrk = cur_vma->sbrk;
 
   /* INCREASE THE LIMIT as inovking systemcall 
    * sys_memap with SYSMEM_INC_OP 
@@ -253,14 +253,17 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
   /* commit the limit increment */
     
-  caller->mm->symrgtbl[rgid].rg_start = old_sbrk;
-  caller->mm->symrgtbl[rgid].rg_end = old_sbrk+size;
-  *alloc_addr =old_sbrk;
 
   /* TODO: commit the allocation address 
   // *alloc_addr = ...
   */
+get_free_vmrg_area(caller, vmaid, size, &rgnode) ;
+  
+  caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
+  caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
 
+  *alloc_addr = rgnode.rg_start;
+  pthread_mutex_unlock(&mmvm_lock);
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
 
@@ -695,15 +698,14 @@ int get_free_helper_best_fit(
   target->rg_start = c->rg_start;
   target->rg_end = target->rg_start + size;
   //remove from free list
-  c->rg_start = c->rg_end + 1;
-  if(c->rg_start > c->rg_end){
+  c->rg_start = target->rg_end ;
+  if(c->rg_start >= c->rg_end){
     //cut (c) out of list
     struct vm_rg_struct * d = c->rg_next;
     free(c);
     *runner = d;
-    return 0;
   }
-  return -1;
+  return 0;
 }
 
 //#endif
