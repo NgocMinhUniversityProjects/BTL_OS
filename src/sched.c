@@ -109,7 +109,7 @@ struct pcb_t * get_proc(void) {
 	 * Remember to use lock to protect the queue.
 	 * */
 	pthread_mutex_lock(&queue_lock);
-	dequeue(&ready_queue);
+	proc = dequeue(&ready_queue);
 	pthread_mutex_unlock(&queue_lock);
 	return proc;
 }
