@@ -106,6 +106,7 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
       old_end, incnumpage,area) < 0) {
       return -1; 
   } 
+  //add it to free list so lib-mem has access to it
   enlist_vm_rg_node(&cur_vma->vm_freerg_list,area);
   return 0;
   
