@@ -524,7 +524,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_READ;
   regs.a2 = fpn * PAGE_SIZE + off;
-  regs.a3 = 0
+  regs.a3 = 0;
 
   /* SYSCALL 17 sys_memmap */
   int status = syscall(caller, 17, &regs); //pass in caller, caller->mram is called sys_mem.c already
