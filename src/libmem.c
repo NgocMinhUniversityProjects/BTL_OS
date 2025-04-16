@@ -522,7 +522,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
    */
   // int phyaddr
   struct sc_regs regs;
-  regs.a1 = SYSTEM_IO_READ;
+  regs.a1 = SYSMEM_IO_READ;
   regs.a2 = fpn * PAGE_SIZE + off;
   regs.a3 = 0
 
@@ -567,7 +567,7 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
    */
   // int phyaddr
   struct sc_regs regs;
-  regs.a1 = SYSTEM_IO_WRITE;
+  regs.a1 = SYSMEM_IO_WRITE;
   regs.a2 = fpn * PAGE_SIZE + off;
   regs.a3 = value;
 
@@ -613,7 +613,7 @@ int libread(
   int val = __read(proc, 0, source, offset, &data);
 
   /* TODO update result of reading action*/
-  //destination 
+  destination = data;
 #ifdef IODUMP
   printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
