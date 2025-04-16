@@ -141,18 +141,90 @@ static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
  */
 int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
 {
-  struct vm_rg_struct *rg_node = mm->mmap->vm_freerg_list;
-
-  if (rg_elmt->rg_start >= rg_elmt->rg_end)
-    return -1; //invalid reagion?
-
-  if (rg_node != NULL)
-    rg_elmt->rg_next = rg_node;
+  if(rg_elmt == NULL) return -1; //invalid region
+  if (rg_elmt->rg_start >= rg_elmt->rg_end) return -1; //invalid reagion
+  rg_elmt->rg_next = NULL; //this line explicitly fixxed the bug mentioned above
 
   /* Enlist the new region */
-  mm->mmap->vm_freerg_list = rg_elmt;
+  //Update 16/04/2025 : added merging of next-to regions
+  
+  struct vm_rg_struct * runner = mm->mmap->vm_freerg_list;
 
-  return 0;
+  //case list empty
+  if (runner == NULL) {
+    mm->mmap->vm_freerg_list = rg_elmt;
+    return 0;
+  }
+
+  //case new region is less than or overlaps with the head
+  int status = get_order_between_2_regions(runner, rg_elmt);
+  switch (status) {
+    case -1: 
+      return -1;
+
+    case 2:
+      //insert to head of list
+      rg_elmt->rg_next = runner;
+      mm->mmap->vm_freerg_list = rg_elmt;
+      return 0;
+    
+    case 0:
+      //overlaps
+      //start takes the min, end take the max
+      if(rg_elmt->rg_start < runner->rg_start)
+        runner->rg_start = rg_elmt->rg_start;
+      
+      if(rg_elmt->rg_end > runner->rg_end)
+        runner->rg_end = rg_elmt->rg_end;
+
+      return 0;
+  
+    default:
+      break;
+  }
+  
+  //else
+  //traverse the list to ensure region begin is increasing
+  //ensure order of list = order of region 
+  //do insertion sort basically
+  while(runner){
+    
+    status = get_order_between_2_regions(runner->rg_next, rg_elmt);
+    switch (status){
+      case -1:
+      case 2:
+        //insert next to runner
+        //2 case this happens, either status == -1 (runner->rg_next == NULL)
+        //or status == 2 previous status = 1 (new element between runner and runner->next)
+        // previous status is guaranteed to be 1
+        // due to any status other than 1 is returned already
+        // and initial when entering the loop is 1
+        rg_elmt->rg_next = runner->rg_next;
+        runner->rg_next = rg_elmt;
+        return 0;
+
+      case 0:
+        //overlaps with runner->rg_next
+        if(rg_elmt->rg_start < runner->rg_next->rg_start)
+          runner->rg_next->rg_start = rg_elmt->rg_start;
+        
+        if(rg_elmt->rg_end > runner->rg_next->rg_end)
+          runner->rg_next->rg_end = rg_elmt->rg_end;
+    
+        return 0;
+      
+      case 1:
+        runner = runner->rg_next;
+        break;
+
+      
+      default:
+        return -1;
+    }
+  }
+
+  //cant possibly reach here but -1 just in case
+  return -1;
 }
 
 /*get_symrg_byid - get mem region by region ID
@@ -667,6 +739,19 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
 
 // modified on 31/03/2025 by Minh
 //helper func
+
+// 0 = overlapped
+// 1 = A -> B
+// 2 = B -> A
+// -1 = at least 1 region ptr is NULL
+//assumtion: region is correct and end > start 
+int get_order_between_2_regions(struct vm_rg_struct * A, struct vm_rg_struct * B){
+  if(A == NULL || B == NULL) return -1;
+  if(A->rg_end < B->rg_start) return 1;
+  if(A->rg_start > B->rg_end) return 2;
+  return 0;
+}
+
 int get_free_helper_first_fit(
   struct vm_rg_struct ** runner, 
   int size, struct 
