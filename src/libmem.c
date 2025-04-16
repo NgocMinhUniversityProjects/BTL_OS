@@ -119,7 +119,9 @@ libfree: wrapper to call __free on virtual area 0 (guess)
 
 get_free_vmrg_area (we implement) (implemented?)
   
-
+pg_*:
+Not sure about fpn * PAGE_SIZE + off, since teacher use
+fpn * PAGING_SIZESZ + off insteand, but mine makes more sense
 
 */
 
@@ -413,24 +415,24 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
  *
  */
 // [ 4/4/2025 - Chung ]
+
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
   pthread_mutex_lock(&mmvm_lock);
   uint32_t pte = mm->pgd[pgn];
-  
+
   if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
     int vicpgn, swpfpn; 
 
-    uint32_t vicpte = mm->pgd[vicpgn];
-    
-    int vicfpn = PAGING_PTE_FPN(vicpte);
     int tgtfpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
-
+    
     /* TODO: Play with your paging theory here */
     /* Find victim page */
     find_victim_page(caller->mm, &vicpgn);
-
+    uint32_t vicpte = mm->pgd[vicpgn];
+    int vicfpn = PAGING_PTE_FPN(vicpte);
+    
     /* Get free frame in MEMSWP */
     MEMPHY_get_freefp(caller->active_mswp, &swpfpn);
 
@@ -441,17 +443,16 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      * SYSCALL 17 sys_memmap 
      * with operation SYSMEM_SWP_OP
      */
-    struct sc_regs regs;
-    regs.a1 = SYSMEM_SWP_OP;
-    regs.a2 = vicfpn;
-    regs.a3 = swpfpn;
 
-    /* SYSCALL 17 sys_memmap */
-    int status = syscall(caller, 17, &regs);
-    if (status != 0) {
-      pthread_mutex_unlock(&mmvm_lock);
-      return status;
-    }
+    __swap_cp_page(caller->mram, vicfpn, caller->active_mswp, swpfpn);
+    // struct sc_regs regs;
+    // regs.a1 = SYSMEM_SWP_OP;
+    // regs.a2 = vicfpn;
+    // regs.a3 = swpfpn;
+
+    // /* SYSCALL 17 sys_memmap */
+    // int status = syscall(caller, 17, &regs);
+    // if (status != 0) return status;
 
     /* TODO copy target frame form swap to mem 
      * SWP(tgtfpn <--> vicfpn)
@@ -460,29 +461,34 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      */
     /* TODO copy target frame form swap to mem 
     */
-   regs.a1 = SYSMEM_SWP_OP;
-   regs.a2 = tgtfpn;
-   regs.a3 = vicfpn;
 
-    /* SYSCALL 17 sys_memmap */
-    status = syscall(caller, 17, &regs);
-    if (status != 0) {
-      pthread_mutex_unlock(&mmvm_lock);
-      return status;
-    }
+    __swap_cp_page(caller->active_mswp, tgtfpn, caller->mram, vicfpn);
+    // regs.a1 = SYSMEM_SWP_OP;
+    // regs.a2 = tgtfpn;
+    // regs.a3 = vicfpn;
+
+    // /* SYSCALL 17 sys_memmap */
+    // status = syscall(caller, 17, &regs);
+    // if (status != 0) return status;
 
     /* Update page table */
-    //pte_set_swap(caller->page_table, ?, ?) 
+    // pte_set_swap(vicpte, );
     //mm->pgd;
 
     /* Update its online status of the target page */
-    //pte_set_fpn() &
-    //mm->pgd[pgn];
+    // pte_set_fpn(pte, tgtfpn);
+    // mm->pgd[pgn] = vicfpn;
     //pte_set_fpn();
 
-    enlist_pgn_node(&caller->mm->fifo_pgn,pgn);
+    mm->pgd[pgn] = vicfpn;
+    mm->pgd[vicpgn] = swpfpn;
+    mm->pgd[PAGING_PTE_SWP(pte)] = tgtfpn;
+
+    // enlist_pgn_node(&caller->mm->fifo_pgn,pgn);
+    // - Old target frame become free
+    enlist_pgn_node(&caller->mm->fifo_pgn, mm->pgd[PAGING_PTE_SWP(pte)]);
   }
-  
+
   *fpn = PAGING_FPN(mm->pgd[pgn]);
   pthread_mutex_unlock(&mmvm_lock);
 
@@ -514,11 +520,11 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
    *  MEMPHY READ 
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
    */
-  int phyaddr = fpn + off; //?, not sure
+  // int phyaddr
   struct sc_regs regs;
-  regs.a1 = SYSMEM_IO_READ;
-  regs.a2 = phyaddr;
-  regs.a3 = 0; //will be overridden by the call later
+  regs.a1 = SYSTEM_IO_READ;
+  regs.a2 = fpn * PAGE_SIZE + off;
+  regs.a3 = 0
 
   /* SYSCALL 17 sys_memmap */
   int status = syscall(caller, 17, &regs); //pass in caller, caller->mram is called sys_mem.c already
@@ -559,10 +565,10 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
    *  MEMPHY WRITE
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_WRITE
    */
-  int phyaddr = fpn + off; //? not sure
+  // int phyaddr
   struct sc_regs regs;
-  regs.a1 = SYSMEM_IO_WRITE;
-  regs.a2 = phyaddr;
+  regs.a1 = SYSTEM_IO_WRITE;
+  regs.a2 = fpn * PAGE_SIZE + off;
   regs.a3 = value;
 
   /* SYSCALL 17 sys_memmap */
