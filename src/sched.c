@@ -58,6 +58,7 @@ struct pcb_t * get_mlq_proc(void) {
 		}
 		proc = dequeue(&mlq_ready_queue[i]);
 		slot[i]--;
+		break;
 	}
 	if (proc == NULL) {
 		for (int i = 0; i < MAX_PRIO; i++) {
