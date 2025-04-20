@@ -4,7 +4,6 @@
 #include "string.h"
 #include <pthread.h>
 #include <stdio.h>
-#include "../include/common.h"
 
 static BYTE _ram[RAM_SIZE];
 

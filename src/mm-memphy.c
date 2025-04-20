@@ -27,7 +27,7 @@ int MEMPHY_mv_csr(struct memphy_struct *mp, int offset)
    }
 
    return 0;
-}
+};
 
 /*
  *  MEMPHY_seq_read - read MEMPHY device
@@ -47,7 +47,7 @@ int MEMPHY_seq_read(struct memphy_struct *mp, int addr, BYTE *value)
    *value = (BYTE)mp->storage[addr];
 
    return 0;
-}
+};
 
 /*
  *  MEMPHY_read read MEMPHY device
@@ -66,7 +66,7 @@ int MEMPHY_read(struct memphy_struct *mp, int addr, BYTE *value)
       return MEMPHY_seq_read(mp, addr, value);
 
    return 0;
-}
+};
 
 /*
  *  MEMPHY_seq_write - write MEMPHY device
@@ -87,7 +87,7 @@ int MEMPHY_seq_write(struct memphy_struct *mp, int addr, BYTE value)
    mp->storage[addr] = value;
 
    return 0;
-}
+};
 
 /*
  *  MEMPHY_write-write MEMPHY device
@@ -106,7 +106,7 @@ int MEMPHY_write(struct memphy_struct *mp, int addr, BYTE data)
       return MEMPHY_seq_write(mp, addr, data);
 
    return 0;
-}
+};
 
 /*
  *  MEMPHY_format-format MEMPHY device
@@ -138,7 +138,7 @@ int MEMPHY_format(struct memphy_struct *mp, int pagesz)
    }
 
    return 0;
-}
+};
 
 int MEMPHY_get_freefp(struct memphy_struct *mp, int *retfpn)
 {
@@ -156,7 +156,7 @@ int MEMPHY_get_freefp(struct memphy_struct *mp, int *retfpn)
    free(fp);
 
    return 0;
-}
+};
 
 int MEMPHY_dump(struct memphy_struct *mp)
 {
@@ -164,10 +164,10 @@ int MEMPHY_dump(struct memphy_struct *mp)
    *     for tracing the memory content
    */
    printf("===== PHYSICAL MEMORY DUMP =====\n");  
- for (int i = 0; i < mp->maxsz; i++) if (mp->storage[i])  printf("BYTE %08X: %d\n", i, mp->storage[i]);
- printf("===== PHYSICAL MEMORY END-DUMP =====\n");  
+   for (int i = 0; i < mp->maxsz; i++) if (mp->storage[i])  printf("BYTE %08X: %d\n", i, mp->storage[i]);
+   printf("===== PHYSICAL MEMORY END-DUMP =====\n");  
    return 0;
-}
+};
 
 int MEMPHY_put_freefp(struct memphy_struct *mp, int fpn)
 {
@@ -180,7 +180,7 @@ int MEMPHY_put_freefp(struct memphy_struct *mp, int fpn)
    mp->free_fp_list = newnode;
 
    return 0;
-}
+};
 
 /*
  *  Init MEMPHY struct
@@ -195,8 +195,9 @@ int init_memphy(struct memphy_struct *mp, int max_size, int randomflg)
 
    mp->rdmflg = (randomflg != 0) ? 1 : 0;
 
-   if (!mp->rdmflg) /* Not Ramdom acess device, then it serial device*/
+   if (!mp->rdmflg) { /* Not Ramdom acess device, then it serial device*/
       mp->cursor = 0;
+   }
 
    return 0;
 }

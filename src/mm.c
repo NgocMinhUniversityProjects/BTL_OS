@@ -95,18 +95,6 @@ int vmap_page_range(struct pcb_t *caller,           // process call
   //ret_rg->rg_start = ...
   //ret_rg->vmaid = ...
   */
-
-  // check enough frame?
-  int frame_count = 0;
-  struct framephy_struct *fpit = frames;
-  while (fpit != NULL) {
-      frame_count++;
-      fpit = fpit->fp_next;
-  }
-  if (frame_count < pgnum) {
-      return -1; 
-  }
-  //
   ret_rg->rg_start = addr;
   ret_rg->rg_end = addr + pgnum * PAGING_PAGESZ;
   //
@@ -115,15 +103,14 @@ int vmap_page_range(struct pcb_t *caller,           // process call
    *      [addr to addr + pgnum*PAGING_PAGESZ
    *      in page table caller->mm->pgd[]
    */
-  fpit = frames;
+  struct framephy_struct *fpit = frames;
   for (pgit = 0; pgit < pgnum && fpit != NULL; pgit++, fpit = fpit->fp_next ){
     pte_set_fpn(&caller->mm->pgd[pgn + pgit], fpit->fpn);
-    enlist_pgn_node(&caller->mm->fifo_pgn, pgn + pgit);
   }
   //
   /* Tracking for later page replacement activities (if needed)
    * Enqueue new usage page */
-  // enlist_pgn_node(&caller->mm->fifo_pgn, pgn + pgit);
+  enlist_pgn_node(&caller->mm->fifo_pgn, pgn + pgit);
 
   return 0;
 }
@@ -144,47 +131,30 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
   //caller-> ...
   //frm_lst-> ...
   */
-  int allocated = 0;
-  *frm_lst = NULL;
-  struct framephy_struct *lastfp = NULL;
-  //
 
+  if (req_pgnum > caller->mram->maxsz / PAGING_PAGESZ)
+  {
+    return -3000; // Out of memory
+  }
+
+  int allocated = 0;
   for (pgit = 0; pgit < req_pgnum; pgit++)
   {
   /* TODO: allocate the page 
    */
     if (MEMPHY_get_freefp(caller->mram, &fpn) == 0)
     {
-      // implement
-      newfp_str = malloc(sizeof(struct framephy_struct)); // allocate
-      //
+      newfp_str = malloc(sizeof(struct framephy_struct));
       newfp_str->fpn = fpn;
-      // implement
-      newfp_str->fp_next = NULL;
-      if (*frm_lst == NULL){
-        *frm_lst = newfp_str;
-      }
-      else
-      {
-        lastfp->fp_next = newfp_str;
-      }
-      lastfp = newfp_str;
+      newfp_str->fp_next = *frm_lst;
+      newfp_str->owner = caller->mm;
+      *frm_lst = newfp_str;
       allocated++;
-      //
-
     }
     else
     { // TODO: ERROR CODE of obtaining somes but not enough frames
-      struct framephy_struct *current = *frm_lst;
-      while (current != NULL) {
-          struct framephy_struct *next = current->fp_next;
-          MEMPHY_put_freefp(caller->mram, current->fpn); 
-          free(current);
-          current = next;
-      }
-      if (allocated > 0) return -1;
-      else return -3000;
-      //
+      if (allocated > 0) return -3000; 
+      else return -1; 
     }
   }
 
