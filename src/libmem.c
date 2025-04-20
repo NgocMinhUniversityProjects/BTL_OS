@@ -482,14 +482,14 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     /* Update page table entries */
 
     //sets the frame number of pgn to victim's fpn
-    pte_set_fpn(mm->pgd[pgn], victim_fpn);
+    pte_set_fpn(&mm->pgd[pgn], victim_fpn);
     
     //sets the frame number of victim fpn to being in swapped now
     //after 2 hours of reading
     //swap type is unmentioned
     //but i presumed its the id of the active swap device
     //its unused anyway
-    pte_set_swap(mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
+    pte_set_swap(&mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
 
     // - Add to the fifo queue
     enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
@@ -622,7 +622,7 @@ int libread(
   int val = __read(proc, 0, source, offset, &data);
 
   /* TODO update result of reading action*/
-  destination = data;
+  *destination = data;
 #ifdef IODUMP
   printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
@@ -662,6 +662,7 @@ int libwrite(
     uint32_t destination, // Index of destination register
     uint32_t offset)
 {
+  int val = __write(proc, 0, destination, offset, data);
 #ifdef IODUMP
   printf("write region=%d offset=%d value=%d\n", destination, offset, data);
 #ifdef PAGETBL_DUMP
@@ -670,7 +671,7 @@ int libwrite(
   MEMPHY_dump(proc->mram);
 #endif
 
-  return __write(proc, 0, destination, offset, data);
+  return val;
 }
 
 /*free_pcb_memphy - collect all memphy of pcb
