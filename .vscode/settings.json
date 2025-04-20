@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "common.h": "c",
+        "cstdlib": "c",
+        "deque": "c",
+        "vector": "c",
+        "xmemory": "c",
+        "syscall.h": "c"
+    }
+}
