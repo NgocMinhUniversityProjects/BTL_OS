@@ -94,6 +94,54 @@ Probably more but idk, this seems all of it
 
 
 NOTE: caller->page_table IS OBSOLETED, use mm->pgd instead
+  <currently unused, teach reccoment use for page swapping, but we can also not use this>
+
+# Explains every functions in this file: (unfinished note)
+
+enlist_vm_freerg_list: (teach implement)
+  add a region to the free region list of the first area in the given manager
+  add to top
+  return -1 if invalid region, 0 if successful
+
+  however, 1 potential bug(?) i noticed is that it only fix the link if the free list isnt null
+  consequence is if we invoke this function with a already linked region
+  aka, the passed in region is linked to something else
+  it will only break this link if the free list is not null
+  leading to...potentially adding multiple regions to the free list at once
+  dont know if this is a bug or a feature honestly
+
+get_symrg_byid: (teach implement)
+  get a symbol by symbol index (id)
+  returns null if invalid index
+
+__alloc: (we implement)
+  the caller wants to allocate a memory with size <size> to the symbol <rgid> 
+  in region <rgid> in area <vmaid>
+  params:
+    <pcb data> caller
+    <memory area id> vmaid
+    <memory region id> rgid
+    size
+    
+    
+    <change this to the start of the allocated address> alloc_addr
+
+  progress: 80%, problem with syscall 17 rn
+
+__free: (we implement)  
+  adds a region to freerg list
+
+liballoc: wrapper to call __alloc on virtual area 0 (guess)
+libfree: wrapper to call __free on virtual area 0 (guess)
+  
+
+
+get_free_vmrg_area (we implement) (implemented?)
+  
+pg_*:
+Not sure about fpn * PAGE_SIZE + off, since teacher use
+fpn * PAGING_SIZESZ + off insteand, but mine makes more sense
+
 */
 
 
@@ -388,11 +436,13 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
  *@caller: caller
  *
  */
+// [ 4/4/2025 - Chung ]
+
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
   int status;
   uint32_t pte = mm->pgd[pgn];
-  
+
   if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
     int vicpgn, swpfpn; 
@@ -403,7 +453,15 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     
     uint32_t vicpte = mm->pgd[vicpgn];
     int vicfpn = PAGING_PTE_FPN(vicpte);
+
     int tgtfpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
+    
+    
+    /* TODO: Play with your paging theory here */
+    /* Find victim page */
+    find_victim_page(caller->mm, &vicpgn);
+    uint32_t vicpte = mm->pgd[vicpgn];
+    int vicfpn = PAGING_PTE_FPN(vicpte);
     
     /* Get free frame in MEMSWP */
     status = MEMPHY_get_freefp(caller->active_mswp, &swpfpn);
@@ -416,14 +474,16 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      * SYSCALL 17 sys_memmap 
      * with operation SYSMEM_SWP_OP
      */
-    struct sc_regs regs;
-    regs.a1 = SYSMEM_SWP_OP;
-    regs.a2 = vicfpn;
-    regs.a3 = swpfpn;
 
-    /* SYSCALL 17 sys_memmap */
-    int status = syscall(caller, 17, &regs);
-    if (status != 0) return status;
+    __swap_cp_page(caller->mram, vicfpn, caller->active_mswp, swpfpn);
+    // struct sc_regs regs;
+    // regs.a1 = SYSMEM_SWP_OP;
+    // regs.a2 = vicfpn;
+    // regs.a3 = swpfpn;
+
+    // /* SYSCALL 17 sys_memmap */
+    // int status = syscall(caller, 17, &regs);
+    // if (status != 0) return status;
 
     /* TODO copy target frame form swap to mem 
      * SWP(tgtfpn <--> vicfpn)
@@ -432,36 +492,34 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
      */
     /* TODO copy target frame from swap to mem 
     */
-   regs.a1 = SYSMEM_SWP_OP;
-   regs.a2 = tgtfpn;
-   regs.a3 = vicfpn;
 
-    /* SYSCALL 17 sys_memmap */
-    status = syscall(caller, 17, &regs);
-    if (status != 0) return status;
-    
+    __swap_cp_page(caller->active_mswp, tgtfpn, caller->mram, vicfpn);
+    // regs.a1 = SYSMEM_SWP_OP;
+    // regs.a2 = tgtfpn;
+    // regs.a3 = vicfpn;
+
+    // /* SYSCALL 17 sys_memmap */
+    // status = syscall(caller, 17, &regs);
+    // if (status != 0) return status;
 
     /* Update page table */
-    //Minh - 20/04/2025
-
-    //changes:
-    //victim page -> present in swap
-    //I have spent like 2 hours reading the docs
-    //am making educated guess here that
-    //swap type is the active swap device id
-    //and swap offset is our swapped address
-    //there are no mention of swap type anywhere ngl, but swap offset IS obtained above through PAGING_PTE_SWP
-    pte_set_swap(mm->pgd[vicpgn], caller->active_mswp_id, swpfpn); 
+    // pte_set_swap(vicpte, );
+    //mm->pgd;
 
     /* Update its online status of the target page */
-    //mm->pgd[pgn];
+    // pte_set_fpn(pte, tgtfpn);
+    // mm->pgd[pgn] = vicfpn;
     //pte_set_fpn();
-    //target page (pgn) -> present in memory
-    pte_set_fpn(mm->pgd[pgn], vicfpn);
 
-    enlist_pgn_node(&caller->mm->fifo_pgn,pgn);
+    mm->pgd[pgn] = vicfpn;
+    mm->pgd[vicpgn] = swpfpn;
+    mm->pgd[PAGING_PTE_SWP(pte)] = tgtfpn;
+
+    // enlist_pgn_node(&caller->mm->fifo_pgn,pgn);
+    // - Old target frame become free
+    enlist_pgn_node(&caller->mm->fifo_pgn, mm->pgd[PAGING_PTE_SWP(pte)]);
   }
-  
+
   *fpn = PAGING_FPN(mm->pgd[pgn]);
   return 0;
 }
@@ -491,14 +549,11 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
    *  MEMPHY READ 
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
    */
-  int phyaddr;
-  int status = translate(addr, &phyaddr, caller);
-  if(status != 0) return status;
-
+  // int phyaddr
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_READ;
-  regs.a2 = phyaddr;
-  regs.a3 = 0; //will be overridden by the call later
+  regs.a2 = fpn * PAGE_SIZE + off;
+  regs.a3 = 0;
 
   /* SYSCALL 17 sys_memmap */
   int status = syscall(caller, 17, &regs); //pass in caller, caller->mram is called sys_mem.c already
@@ -539,10 +594,10 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
    *  MEMPHY WRITE
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_WRITE
    */
-  int phyaddr = fpn + off; //? not sure
+  // int phyaddr
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_WRITE;
-  regs.a2 = phyaddr;
+  regs.a2 = fpn * PAGE_SIZE + off;
   regs.a3 = value;
 
   /* SYSCALL 17 sys_memmap */
@@ -587,7 +642,7 @@ int libread(
   int val = __read(proc, 0, source, offset, &data);
 
   /* TODO update result of reading action*/
-  //destination 
+  destination = data;
 #ifdef IODUMP
   printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
