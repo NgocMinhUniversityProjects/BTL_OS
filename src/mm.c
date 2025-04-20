@@ -178,6 +178,7 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
       struct framephy_struct *current = *frm_lst;
       while (current != NULL) {
           struct framephy_struct *next = current->fp_next;
+          MEMPHY_put_freefp(caller->mram, current->fpn); 
           free(current);
           current = next;
       }
