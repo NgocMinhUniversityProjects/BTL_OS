@@ -75,6 +75,25 @@ symrgtbl : <array of 30 memory regions reserved to represent namespaces>
   each namespace is 1 region
 
 fifo_page : <the next page if fifo is used for page swap>
+  teach reccoment use for page swapping, but we can also not use this
+  
+Note on free(void * ptr)
+free is a function SPECIFICALLY to free memory on the HEAP
+aka, memory previously obtained using malloc, realloc, calloc only
+doing the normal struct abc x = ....
+means its on the HEAP
+freeing it is unintended behavior
+
+whats on the heap in our project:
+the vm_area_rg struct (malloc in mm-vm-c, function get_vm_area_node_at_brk)
+the framephy_struct struct (malloc in mm.c, function alloc_pages_range)
+the mm struct (malloc in os.c, function ld_routine)
+the pcb_t struct (malloc in loader.c, load funtion)
+
+Probably more but idk, this seems all of it
+
+
+NOTE: caller->page_table IS OBSOLETED, use mm->pgd instead
   <currently unused, teach reccoment use for page swapping, but we can also not use this>
 
 # Explains every functions in this file: (unfinished note)
@@ -322,17 +341,11 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
     pthread_mutex_unlock(&mmvm_lock);
     return status;
   }
-
-  //ok, I have no clue where the allocation is 
-  //its a bunch of unfinished implementation???
-  //commit here means we take whatever the syscall do and apply it
-  //but i dont know how to apply it cause idk where the syscall allocates the new thing?
-
-
   /* commit the limit increment */
 
   // Solution proposed by Thien at merging of patch 7
   // just run the get free again 
+  //since by agreement, the new freed area is enlisted again
   if(get_free_vmrg_area(caller, vmaid, size, &rgnode) == -1){
     //stil fails to find free area after all that
     alloc_addr = NULL;
@@ -407,6 +420,9 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   return __free(proc, 0, reg_index);
 }
 
+// [ 4/4/2025 - Chung ]
+// [20/4/2025 - Minh, remove the lock since this is an internal function called only in getval and setval, which already has a lock]
+//granted...i added the lock in the first place, sory
 /*pg_getpage - get the page in ram
  *@mm: memory region
  *@pagenum: PGN
@@ -418,80 +434,74 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
 
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
-  pthread_mutex_lock(&mmvm_lock);
   uint32_t pte = mm->pgd[pgn];
-
+  
   if (!PAGING_PAGE_PRESENT(pte))
   { /* Page is not online, make it actively living */
-    int vicpgn, swpfpn; 
+    int status;
 
-    int tgtfpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
-    
+
+    //we assume if not in ram = in swap
+    int victim_pgn, free_fpn_in_active_swap; 
     /* TODO: Play with your paging theory here */
     /* Find victim page */
-    find_victim_page(caller->mm, &vicpgn);
-    uint32_t vicpte = mm->pgd[vicpgn];
-    int vicfpn = PAGING_PTE_FPN(vicpte);
+    status = find_victim_page(caller->mm, &victim_pgn);
+    if(status != 0) return status;
+    
+    int victim_fpn = PAGING_PTE_FPN(mm->pgd[victim_pgn]);
+    int target_fpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
     
     /* Get free frame in MEMSWP */
-    MEMPHY_get_freefp(caller->active_mswp, &swpfpn);
+    status = MEMPHY_get_freefp(caller->active_mswp, &free_fpn_in_active_swap);
+    if(status != 0) return status;
 
     /* TODO: Implement swap frame from MEMRAM to MEMSWP and vice versa*/
 
-    /* TODO copy victim frame to swap 
-     * SWP(vicfpn <--> swpfpn)
-     * SYSCALL 17 sys_memmap 
-     * with operation SYSMEM_SWP_OP
-     */
 
-    __swap_cp_page(caller->mram, vicfpn, caller->active_mswp, swpfpn);
-    // struct sc_regs regs;
-    // regs.a1 = SYSMEM_SWP_OP;
-    // regs.a2 = vicfpn;
-    // regs.a3 = swpfpn;
-
+    //Minh - 20/04/2025, changed back to using syscalls
+    //swap procedure:
+    // victim -> free
+    
+    struct sc_regs regs;
+    regs.a1 = SYSMEM_SWP_OP;
+    regs.a2 = victim_fpn;
+    regs.a3 = free_fpn_in_active_swap;
+    
     // /* SYSCALL 17 sys_memmap */
-    // int status = syscall(caller, 17, &regs);
-    // if (status != 0) return status;
+    int status = syscall(caller, 17, &regs);
+    if (status != 0) return status;
+    
+    // target -> victim 
+    regs.a2 = target_fpn;
+    regs.a3 = victim_fpn;
 
-    /* TODO copy target frame form swap to mem 
-     * SWP(tgtfpn <--> vicfpn)
-     * SYSCALL 17 sys_memmap
-     * with operation SYSMEM_SWP_OP
-     */
-    /* TODO copy target frame form swap to mem 
-    */
+    /* SYSCALL 17 sys_memmap */
+    status = syscall(caller, 17, &regs);
+    if (status != 0) return status;
 
-    __swap_cp_page(caller->active_mswp, tgtfpn, caller->mram, vicfpn);
-    // regs.a1 = SYSMEM_SWP_OP;
-    // regs.a2 = tgtfpn;
-    // regs.a3 = vicfpn;
+    /* Update page table entries */
 
-    // /* SYSCALL 17 sys_memmap */
-    // status = syscall(caller, 17, &regs);
-    // if (status != 0) return status;
+    //sets the frame number of pgn to victim's fpn
+    pte_set_fpn(mm->pgd[pgn], victim_fpn);
+    
+    //sets the frame number of victim fpn to being in swapped now
+    //after 2 hours of reading
+    //swap type is unmentioned
+    //but i presumed its the id of the active swap device
+    //its unused anyway
+    pte_set_swap(mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
 
-    /* Update page table */
-    // pte_set_swap(vicpte, );
-    //mm->pgd;
+    // - Add to the fifo queue
+    enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
 
-    /* Update its online status of the target page */
-    // pte_set_fpn(pte, tgtfpn);
-    // mm->pgd[pgn] = vicfpn;
-    //pte_set_fpn();
+    //enlist the free of the target's old frames into the current active mem swap device
+    MEMPHY_put_freefp(caller->active_mswp, target_fpn);
 
-    mm->pgd[pgn] = vicfpn;
-    mm->pgd[vicpgn] = swpfpn;
-    mm->pgd[PAGING_PTE_SWP(pte)] = tgtfpn;
-
-    // enlist_pgn_node(&caller->mm->fifo_pgn,pgn);
-    // - Old target frame become free
-    enlist_pgn_node(&caller->mm->fifo_pgn, mm->pgd[PAGING_PTE_SWP(pte)]);
+    *fpn = victim_fpn;
+    return 0;
   }
 
   *fpn = PAGING_FPN(mm->pgd[pgn]);
-  pthread_mutex_unlock(&mmvm_lock);
-
   return 0;
 }
 
@@ -520,7 +530,6 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
    *  MEMPHY READ 
    *  SYSCALL 17 sys_memmap with SYSMEM_IO_READ
    */
-  // int phyaddr
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_READ;
   regs.a2 = fpn * PAGE_SIZE + off;
@@ -680,7 +689,8 @@ int free_pcb_memph(struct pcb_t *caller)
   {
     pte= caller->mm->pgd[pagenum];
 
-    if (!PAGING_PAGE_PRESENT(pte))
+    //why the ! exist ?
+    if (PAGING_PAGE_PRESENT(pte))
     {
       fpn = PAGING_PTE_FPN(pte);
       MEMPHY_put_freefp(caller->mram, fpn);
@@ -702,19 +712,32 @@ int free_pcb_memph(struct pcb_t *caller)
 // [ 03/04/2025 - Chung ]
 int find_victim_page(struct mm_struct *mm, int *retpgn)
 {
-  struct pgn_t *pg = mm->fifo_pgn;
+  struct pgn_t ** pg = &(mm->fifo_pgn);
 
   /* Implement the theorical mechanism to find the victim page */
   //current implementation: uses fifo for now
 
-  if (!pg) {
+  //page finding strategy:
+  //OPTIMAL: unimplementable
+  //FIFO: returns the last page of mm->fifo_pgn list, since enlist_pgn_node adds it to the front
+  //FILO: returns the first page of the mm->fifo_pgn_list
+  //second chance: each page needs a reference bit, we....do not store...that bit
+  //one possible fix is just change the pgn struct
+  //but seems dangerous
+  //working set: require time interupts, we dont have that rn
+
+  //just go with fifo for now
+
+  if (!(*pg)) {
     return -1;
   }
 
-  retpgn = pg->pgn;
-  mm->fifo_pgn = mm->fifo_pgn->pg_next;
-
-  free(pg);
+  //returns the last page
+  while((*pg)->pg_next) pg = &((*pg)->pg_next);
+  (*retpgn) = (*pg)->pgn;
+  //deletion
+  free((*pg));
+  (*pg) = NULL; 
 
   return 0;
 }
@@ -740,7 +763,6 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
 
   struct vm_rg_struct ** runner = &rgit;
   return get_free_helper_best_fit(runner, size, newrg);
-  //return 0;
 }
 
 // modified on 31/03/2025 by Minh
@@ -776,7 +798,7 @@ int get_free_helper_first_fit(
       if(c->rg_start > c->rg_end){
         //cut (c) out of list
         struct vm_rg_struct * d = c->rg_next;
-        free(c);
+        free(c); //calling free is safe since c is on the heap
         *runner = d;
         return 0;
       }
@@ -820,7 +842,7 @@ int get_free_helper_best_fit(
   if(c->rg_start >= c->rg_end){
     //cut (c) out of list
     struct vm_rg_struct * d = c->rg_next;
-    free(c);
+    free(c); //calling free is safe since c is on the heap
     *runner = d;
   }
   return 0;
