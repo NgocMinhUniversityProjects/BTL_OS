@@ -168,6 +168,10 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
 
   /* Enlist the new region */
   //Update 16/04/2025 : added merging of next-to regions
+  //Update 21/04/2025 : added semi-recur merging to fix problem below
+  //problem: 
+  // list: 0->200, 300->500
+  // free: 200->300
   
   struct vm_rg_struct * runner = mm->mmap->vm_freerg_list;
 
@@ -181,10 +185,10 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
   int status = get_order_between_2_regions(runner, rg_elmt);
   switch (status) {
     case -1: 
-      return -1;
+      return -1; //impossible case
 
     case 2:
-      //insert to head of list
+      //merge in front of list
       rg_elmt->rg_next = runner;
       mm->mmap->vm_freerg_list = rg_elmt;
       return 0;
@@ -197,6 +201,24 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
       
       if(rg_elmt->rg_end > runner->rg_end)
         runner->rg_end = rg_elmt->rg_end;
+
+      free(rg_elmt);
+
+      status = get_order_between_2_regions(runner, runner->rg_next);
+      while(status == 0){
+        //overlap occurs
+        //keep runner->next, remove runner
+        if(runner->rg_start < runner->rg_next->rg_start)
+          runner->rg_next->rg_start = runner->rg_start;
+      
+        if(runner->rg_end > runner->rg_next->rg_end)
+          runner->rg_next->rg_end = runner->rg_end;
+
+        mm->mmap->vm_freerg_list = runner->rg_next;
+        free(runner);
+        runner = mm->mmap->vm_freerg_list;
+        status = get_order_between_2_regions(runner, runner->rg_next);
+      }
 
       return 0;
   
@@ -226,12 +248,31 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
 
       case 0:
         //overlaps with runner->rg_next
-        if(rg_elmt->rg_start < runner->rg_next->rg_start)
-          runner->rg_next->rg_start = rg_elmt->rg_start;
+        runner = runner->rg_next;
+        if(rg_elmt->rg_start < runner->rg_start)
+          runner->rg_start = rg_elmt->rg_start;
         
-        if(rg_elmt->rg_end > runner->rg_next->rg_end)
-          runner->rg_next->rg_end = rg_elmt->rg_end;
-    
+        if(rg_elmt->rg_end > runner->rg_end)
+          runner->rg_end = rg_elmt->rg_end;
+
+        free(rg_elmt);
+
+        status = get_order_between_2_regions(runner, runner->rg_next);
+        while(status == 0){
+          //overlap occurs
+          //keep runner->next, remove runner
+          if(runner->rg_start < runner->rg_next->rg_start)
+            runner->rg_next->rg_start = runner->rg_start;
+        
+          if(runner->rg_end > runner->rg_next->rg_end)
+            runner->rg_next->rg_end = runner->rg_end;
+
+          mm->mmap->vm_freerg_list = runner->rg_next;
+          free(runner);
+          runner = mm->mmap->vm_freerg_list;
+          status = get_order_between_2_regions(runner, runner->rg_next);
+        }
+
         return 0;
       
       case 1:
@@ -388,15 +429,13 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   struct vm_rg_struct * newEmptyrg = malloc(sizeof(struct vm_rg_struct));
   newEmptyrg->rg_start = rgnode->rg_start;
   newEmptyrg->rg_end = rgnode->rg_end;
-  newEmptyrg->rg_next = rgnode->rg_next;
-  caller->mm->symrgtbl[rgid] = *newEmptyrg;
   
-
   /*enlist the obsoleted memory region */
   enlist_vm_freerg_list(caller->mm, newEmptyrg);
 
   //make the old symbol unusable
-  rgnode->rg_end = rgnode->rg_start;
+  rgnode->rg_end = 0;
+  rgnode->rg_start = 0;
   rgnode->rg_next = NULL;
 
   pthread_mutex_unlock(&mmvm_lock);
@@ -618,6 +657,9 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE *data)
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
     return -1;
 
+  if(currg->rg_start >= currg->rg_end) //invalid region
+    return -1;
+
   pg_getval(caller->mm, currg->rg_start + offset, data, caller);
 
   return 0;
@@ -660,6 +702,9 @@ int __write(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE value)
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
+    return -1;
+  
+  if(currg->rg_start >= currg->rg_end) //invalid region
     return -1;
 
   pg_setval(caller->mm, currg->rg_start + offset, value, caller);
