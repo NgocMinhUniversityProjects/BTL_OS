@@ -88,7 +88,7 @@ int vmap_page_range(struct pcb_t *caller,           // process call
 {                                                   // no guarantee all given pages are mapped
   //struct framephy_struct *fpit;
   int pgit = 0;
-  addr+=caller->pid*PAGING_MAX_PGN;
+  //addr+=caller->pid*PAGING_MAX_PGN; (commented out by request)
   int pgn = PAGING_PGN(addr);
 
   /* TODO: update the rg_end and rg_start of ret_rg 
