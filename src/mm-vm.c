@@ -52,14 +52,14 @@ int __mm_swap_page(struct pcb_t *caller, int vicfpn , int swpfpn)
  */
 struct vm_rg_struct *get_vm_area_node_at_brk(struct pcb_t *caller, int vmaid, int size, int alignedsz)
 {
-     struct vm_rg_struct* newrg;
+    struct vm_rg_struct* newrg;
     struct vm_area_struct* cur_vma = get_vma_by_num(caller->mm, vmaid);
     if (cur_vma == NULL)return NULL;
     newrg = malloc(sizeof(struct vm_rg_struct));
     if (!newrg) return NULL;
     newrg->rg_start = cur_vma->sbrk;
-    newrg->rg_end = newrg->rg_start + alignedsz;
-    cur_vma->sbrk+=alignedsz;
+    newrg->rg_end = newrg->rg_start + size;
+    cur_vma->sbrk+=size;
     return newrg;
 }
 /*validate_overlap_vm_area
@@ -76,7 +76,7 @@ int validate_overlap_vm_area(struct pcb_t *caller, int vmaid, int vmastart, int 
   /* TODO validate the planned memory area is not overlapped */
     while (vma != NULL) {
         if (vma->vm_id != vmaid) {
-            if (!(vma->vm_end<vmastart||vmaend>vma->vm_start )) {
+            if (!(vma->vm_end<=vmastart||vmaend<=vma->vm_start )) {
                 return -1; 
             }
         }
@@ -93,7 +93,7 @@ int validate_overlap_vm_area(struct pcb_t *caller, int vmaid, int vmastart, int 
  */
 int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
 {
-    int inc_amt = PAGING_PAGE_ALIGNSZ(inc_sz);
+  int inc_amt = PAGING_PAGE_ALIGNSZ(inc_sz);
     int incnumpage = inc_amt / PAGING_PAGESZ;
     struct vm_rg_struct* area = get_vm_area_node_at_brk(caller, vmaid, inc_sz, inc_amt);
     struct vm_area_struct* cur_vma = get_vma_by_num(caller->mm, vmaid);
@@ -101,11 +101,14 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
     int old_end = cur_vma->vm_end;
   if (validate_overlap_vm_area(caller, vmaid, area->rg_start, area->rg_end) < 0)
     return -1;
+    if (cur_vma->sbrk>cur_vma->vm_end){
     cur_vma->vm_end+=inc_amt ;
-  if (vm_map_ram(caller, area->rg_start, area->rg_end,
-      old_end, incnumpage,area) < 0) {
+    struct vm_rg_struct newrg; 
+    if (vm_map_ram(caller, area->rg_start, area->rg_end,
+      old_end, incnumpage,&newrg) < 0) {
       return -1; 
-  } 
+    } 
+}
   //add it to free list so lib-mem has access to it
   enlist_vm_rg_node(&cur_vma->vm_freerg_list,area);
   return 0;
