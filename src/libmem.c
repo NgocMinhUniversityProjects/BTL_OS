@@ -383,10 +383,22 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
 
   pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
-
+  
+  //hard copy to a new struct
+  struct vm_rg_struct * newEmptyrg = malloc(sizeof(struct vm_rg_struct));
+  newEmptyrg->rg_start = rgnode->rg_start;
+  newEmptyrg->rg_end = rgnode->rg_start;
+  newEmptyrg->rg_next = rgnode->rg_next;
+  caller->mm->symrgtbl[rgid] = *newEmptyrg;
+  
 
   /*enlist the obsoleted memory region */
-  enlist_vm_freerg_list(caller->mm, rgnode);
+  enlist_vm_freerg_list(caller->mm, newEmptyrg);
+
+  //make the old symbol unusable
+  rgnode->rg_end = rgnode->rg_start;
+  rgnode->rg_next = NULL;
+
   pthread_mutex_unlock(&mmvm_lock);
 
   return 0;
