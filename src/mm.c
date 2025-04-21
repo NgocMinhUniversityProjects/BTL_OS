@@ -88,6 +88,7 @@ int vmap_page_range(struct pcb_t *caller,           // process call
 {                                                   // no guarantee all given pages are mapped
   //struct framephy_struct *fpit;
   int pgit = 0;
+  addr+=caller->pid*PAGING_MAX_PGN;
   int pgn = PAGING_PGN(addr);
 
   /* TODO: update the rg_end and rg_start of ret_rg 
@@ -106,9 +107,9 @@ int vmap_page_range(struct pcb_t *caller,           // process call
   if (frame_count < pgnum) {
       return -1; 
   }
-  //
-  ret_rg->rg_start = addr;
-  ret_rg->rg_end = addr + pgnum * PAGING_PAGESZ;
+  // //
+  // ret_rg->rg_start = addr;
+  // ret_rg->rg_end = addr + pgnum * PAGING_PAGESZ;
   //
 
   /* TODO map range of frame to address space
@@ -270,7 +271,7 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller)
 
   /* By default the owner comes with at least one vma */
   vma0->vm_id = 0;
-  vma0->vm_start = 0;
+  vma0->vm_start =0;//caller->pid * PAGING_MAX_PGN;
   vma0->vm_end = vma0->vm_start;
   vma0->sbrk = vma0->vm_start;
   struct vm_rg_struct *first_rg = init_vm_rg(vma0->vm_start, vma0->vm_end);
@@ -391,8 +392,8 @@ int print_pgtbl(struct pcb_t *caller, uint32_t start, uint32_t end)
 
   if (end == -1)
   {
-    pgn_start = 0;
     struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, 0);
+    start = cur_vma->vm_start;
     end = cur_vma->vm_end;
   }
   pgn_start = PAGING_PGN(start);
