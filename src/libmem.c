@@ -468,7 +468,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     regs.a3 = free_fpn_in_active_swap;
     
     // /* SYSCALL 17 sys_memmap */
-    int status = syscall(caller, 17, &regs);
+    status = syscall(caller, 17, &regs);
     if (status != 0) return status;
     
     // target -> victim 
@@ -482,14 +482,14 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     /* Update page table entries */
 
     //sets the frame number of pgn to victim's fpn
-    pte_set_fpn(mm->pgd[pgn], victim_fpn);
+    pte_set_fpn(&mm->pgd[pgn], victim_fpn);
     
     //sets the frame number of victim fpn to being in swapped now
     //after 2 hours of reading
     //swap type is unmentioned
     //but i presumed its the id of the active swap device
     //its unused anyway
-    pte_set_swap(mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
+    pte_set_swap(&mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
 
     // - Add to the fifo queue
     enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
@@ -622,7 +622,7 @@ int libread(
   int val = __read(proc, 0, source, offset, &data);
 
   /* TODO update result of reading action*/
-  destination = data;
+  *destination = data;
 #ifdef IODUMP
   printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
@@ -662,6 +662,7 @@ int libwrite(
     uint32_t destination, // Index of destination register
     uint32_t offset)
 {
+  int val = __write(proc, 0, destination, offset, data);
 #ifdef IODUMP
   printf("write region=%d offset=%d value=%d\n", destination, offset, data);
 #ifdef PAGETBL_DUMP
@@ -670,7 +671,7 @@ int libwrite(
   MEMPHY_dump(proc->mram);
 #endif
 
-  return __write(proc, 0, destination, offset, data);
+  return val;
 }
 
 /*free_pcb_memphy - collect all memphy of pcb
@@ -753,15 +754,14 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
 {
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
-  struct vm_rg_struct *rgit = cur_vma->vm_freerg_list;
+  struct vm_rg_struct ** runner = &cur_vma->vm_freerg_list;
 
-  if (rgit == NULL)
+  if (* runner == NULL)
     return -1;
 
   /* Probe unintialized newrg */
   newrg->rg_start = newrg->rg_end = -1;
 
-  struct vm_rg_struct ** runner = &rgit;
   return get_free_helper_best_fit(runner, size, newrg);
 }
 
@@ -820,7 +820,7 @@ int get_free_helper_best_fit(
   while(*runner){
     //best fit algo
     struct vm_rg_struct * c = *runner;
-    int s = c->rg_end - c->rg_start + 1;
+    int s = c->rg_end - c->rg_start;
     if(s >= size) {
       int score = s - size;
       if(score > 0 && score < bestScore || bestScore == -1) {
@@ -838,12 +838,13 @@ int get_free_helper_best_fit(
   //decrease region start
   c->rg_start = target->rg_end;
 
-  //if region start overruns region end, remove it from list
+  // if region start overruns region end, remove it from list
   if(c->rg_start >= c->rg_end){
-    //cut (c) out of list
-    struct vm_rg_struct * d = c->rg_next;
-    free(c); //calling free is safe since c is on the heap
-    *runner = d;
+   //free(c); //calling free is safe since c is on the heap
+   *bestRunner = c->rg_next;
+  //  printf("next region start = %d, end = %d\n", c->rg_next->rg_start, c->next->rg_end);
+    free(c);  
+   return 0;
   }
   return 0;
 }
