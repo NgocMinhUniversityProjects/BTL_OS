@@ -387,7 +387,7 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   //hard copy to a new struct
   struct vm_rg_struct * newEmptyrg = malloc(sizeof(struct vm_rg_struct));
   newEmptyrg->rg_start = rgnode->rg_start;
-  newEmptyrg->rg_end = rgnode->rg_start;
+  newEmptyrg->rg_end = rgnode->rg_end;
   newEmptyrg->rg_next = rgnode->rg_next;
   caller->mm->symrgtbl[rgid] = *newEmptyrg;
   
