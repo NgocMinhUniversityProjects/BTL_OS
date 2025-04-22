@@ -165,87 +165,56 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
   if(rg_elmt == NULL) return -1; //invalid region
   if (rg_elmt->rg_start >= rg_elmt->rg_end) return -1; //invalid reagion
   rg_elmt->rg_next = NULL; //this line explicitly fixxed the bug mentioned above
-
-  /* Enlist the new region */
-  //Update 16/04/2025 : added merging of next-to regions
   
-  struct vm_rg_struct * runner = mm->mmap->vm_freerg_list;
-
-  //case list empty
-  if (runner == NULL) {
-    mm->mmap->vm_freerg_list = rg_elmt;
+  struct vm_rg_struct ** runner =& mm->mmap->vm_freerg_list;
+  if (!(*runner)) {
+    *runner = rg_elmt;
     return 0;
   }
-
-  //case new region is less than or overlaps with the head
-  int status = get_order_between_2_regions(runner, rg_elmt);
-  switch (status) {
-    case -1: 
-      return -1;
-
-    case 2:
-      //insert to head of list
-      rg_elmt->rg_next = runner;
-      mm->mmap->vm_freerg_list = rg_elmt;
-      return 0;
-    
-    case 0:
-      //overlaps
-      //start takes the min, end take the max
-      if(rg_elmt->rg_start < runner->rg_start)
-        runner->rg_start = rg_elmt->rg_start;
-      
-      if(rg_elmt->rg_end > runner->rg_end)
-        runner->rg_end = rg_elmt->rg_end;
-
-      return 0;
   
-    default:
-      break;
-  }
-  
-  //else
-  //traverse the list to ensure region begin is increasing
-  //ensure order of list = order of region 
-  //do insertion sort basically
-  while(runner){
-    
-    status = get_order_between_2_regions(runner->rg_next, rg_elmt);
-    switch (status){
-      case -1:
-      case 2:
-        //insert next to runner
-        //2 case this happens, either status == -1 (runner->rg_next == NULL)
-        //or status == 2 previous status = 1 (new element between runner and runner->next)
-        // previous status is guaranteed to be 1
-        // due to any status other than 1 is returned already
-        // and initial when entering the loop is 1
-        rg_elmt->rg_next = runner->rg_next;
-        runner->rg_next = rg_elmt;
-        return 0;
-
-      case 0:
-        //overlaps with runner->rg_next
-        if(rg_elmt->rg_start < runner->rg_next->rg_start)
-          runner->rg_next->rg_start = rg_elmt->rg_start;
-        
-        if(rg_elmt->rg_end > runner->rg_next->rg_end)
-          runner->rg_next->rg_end = rg_elmt->rg_end;
-    
-        return 0;
-      
-      case 1:
-        runner = runner->rg_next;
-        break;
-
-      
-      default:
-        return -1;
+  if ((*runner)->rg_start > rg_elmt->rg_start) {
+    if(rg_elmt->rg_end==(*runner)->rg_start) {
+      (*runner)->rg_start = rg_elmt->rg_start;
+      free(rg_elmt);
+    } else {
+      rg_elmt->rg_next = *runner;
+      *runner = rg_elmt;
     }
+    return 0;
   }
+  while(*runner ){
+    if (!(*runner)->rg_next) {
+      if ((*runner)->rg_end == rg_elmt->rg_start) {
+        
+        (*runner)->rg_end = rg_elmt->rg_end;
+        free(rg_elmt);
+      }
+      else (*runner)->rg_next = rg_elmt;
+      
+      return 0;
+    }
+    if ((*runner)->rg_next->rg_start >rg_elmt->rg_start) {
+      if(rg_elmt->rg_end==(*runner)->rg_next->rg_start) {
+        (*runner)->rg_next->rg_start = rg_elmt->rg_start;
+        free(rg_elmt);
+        if ((*runner)->rg_next->rg_start == (*runner)->rg_end){
+          (*runner)->rg_next->rg_start=(*runner)->rg_start;
+          struct vm_rg_struct *temp=*runner;
+          *runner=(*runner)->rg_next;
+          free(temp);
+        }
+      }else if ((*runner)->rg_end == rg_elmt->rg_start) {
+        (*runner)->rg_end = rg_elmt->rg_end;
+        free(rg_elmt);
+      }else{
+        rg_elmt->rg_next = (*runner)->rg_next;
+        (*runner)->rg_next = rg_elmt;
+      }
+      return 0;
 
-  //cant possibly reach here but -1 just in case
-  return -1;
+    }
+  runner = &(*runner)->rg_next;
+  }
 }
 
 /*get_symrg_byid - get mem region by region ID
@@ -329,11 +298,12 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
   //luckily, not our job here to know how syscall 17 is implemented
   //its...someone else in the team lmao
+  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
+  int old_sbrk = cur_vma->sbrk;
   struct sc_regs regs;
   regs.a1 =  SYSMEM_INC_OP; //memory operation
   regs.a2 = vmaid; //vmaid
   regs.a3 = size; //increase size
-  
   // SYSCALL 17 sys_memmap
   int status = syscall(caller, 17, &regs); 
   if(status != 0) {
@@ -346,17 +316,16 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   // Solution proposed by Thien at merging of patch 7
   // just run the get free again 
   //since by agreement, the new freed area is enlisted again
-  if(get_free_vmrg_area(caller, vmaid, size, &rgnode) == -1){
+
+  if(cur_vma->sbrk-old_sbrk != size) {
     //stil fails to find free area after all that
     alloc_addr = NULL;
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
   };
-  
-  caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
-  caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
-
-  *alloc_addr = rgnode.rg_start;
+  caller->mm->symrgtbl[rgid].rg_start =old_sbrk;
+  caller->mm->symrgtbl[rgid].rg_end = cur_vma->sbrk;
+  *alloc_addr = old_sbrk;
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
@@ -383,10 +352,19 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
 
   pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
-
-
+  
+  //hard copy to a new struct
+  struct vm_rg_struct * newEmptyrg = malloc(sizeof(struct vm_rg_struct));
+  newEmptyrg->rg_start = rgnode->rg_start;
+  newEmptyrg->rg_end = rgnode->rg_end;
+  
   /*enlist the obsoleted memory region */
-  enlist_vm_freerg_list(caller->mm, rgnode);
+  enlist_vm_freerg_list(caller->mm, newEmptyrg);
+  //make the old symbol unusable
+  rgnode->rg_end = 0;
+  rgnode->rg_start = 0;
+  rgnode->rg_next = NULL;
+
   pthread_mutex_unlock(&mmvm_lock);
 
   return 0;
