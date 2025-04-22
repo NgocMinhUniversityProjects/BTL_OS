@@ -352,6 +352,7 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
 
   if(rgnode->rg_start >= rgnode->rg_end)
+    pthread_mutex_unlock(&mmvm_lock);
     return -1; //invalid region, avoid double free
   
   //hard copy to a new struct
@@ -530,7 +531,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
    */
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_READ;
-  regs.a2 = fpn * PAGE_SIZE + off;
+  regs.a2 = (fpn << 8) + off;
   regs.a3 = 0;
 
   /* SYSCALL 17 sys_memmap */
@@ -575,7 +576,7 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
   // int phyaddr
   struct sc_regs regs;
   regs.a1 = SYSMEM_IO_WRITE;
-  regs.a2 = fpn * PAGE_SIZE + off;
+  regs.a2 = (fpn << 8) + off;
   regs.a3 = value;
 
   /* SYSCALL 17 sys_memmap */
