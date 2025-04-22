@@ -104,14 +104,13 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
 
     if (cur_vma->sbrk>cur_vma->vm_end){
       cur_vma->vm_end+=inc_amt ;
-      struct vm_rg_struct newrg; 
       if (vm_map_ram(caller, area->rg_start, area->rg_end,
-        old_end, incnumpage,&newrg) < 0) {
+        old_end, incnumpage,NULL) < 0) {
+          free(area);
         return -1; 
-    } 
-}
-  //add it to free list so lib-mem has access to it
-  enlist_vm_rg_node(&cur_vma->vm_freerg_list, area);
+      } 
+    }
+    free(area);
   return 0;
   
 }
