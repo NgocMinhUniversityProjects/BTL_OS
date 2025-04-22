@@ -13,6 +13,7 @@
 #include "stdio.h"
 #include "libmem.h"
 #include "queue.h" // Add queue lib to traverse the process list
+#include <string.h>
 
 int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
 {

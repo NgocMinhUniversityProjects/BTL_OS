@@ -307,7 +307,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
   /* TODO retrive current vma if needed, current comment out due to compiler redundant warning*/
   /*Attempt to increate limit to get space */
-  struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
+  //struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
   //int inc_sz = PAGING_PAGE_ALIGNSZ(size);
   //note: inc_sz is passed below to system call to increase the size
@@ -401,9 +401,19 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
 {
   /* TODO Implement allocation on vm area 0 */
   int addr;
+  int val = __alloc(proc, 0, reg_index, size, &addr);
 
+  printf("===== PHYSICAL MEMORY AFTER ALLOCATION =====\n");
+  printf("PID=%d - Region=%d - Address=%08x - Size=%d bytes\n", proc->pid, reg_index, addr, size);
+  print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
+  for (int i = 0; i < PAGING_MAX_PGN; ++i) {
+    if (PAGING_PAGE_PRESENT(proc->mm->pgd[i])){
+      printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
+    }
+  }
+  printf("============================================\n");
   /* By default using vmaid = 0 */
-  return __alloc(proc, 0, reg_index, size, &addr);
+  return val;
 }
 
 /*libfree - PAGING-based free a region memory
@@ -415,9 +425,17 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
 int libfree(struct pcb_t *proc, uint32_t reg_index)
 {
   /* TODO Implement free region */
-
+  int val = __free(proc, 0, reg_index);
+  printf("===== PHYSICAL MEMORY AFTER DEALLOCATION =====\n");
+  print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
+  for (int i = 0; i < PAGING_MAX_PGN; ++i) {
+    if (PAGING_PAGE_PRESENT(proc->mm->pgd[i])){
+      printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
+    }
+  }
+  printf("==============================================\n");
   /* By default using vmaid = 0 */
-  return __free(proc, 0, reg_index);
+  return val;
 }
 
 // [ 4/4/2025 - Chung ]
@@ -613,25 +631,33 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE *data)
 
 /*libread - PAGING-based read a region memory */
 int libread(
-    struct pcb_t *proc, // Process executing the instruction
-    uint32_t source,    // Index of source register
-    uint32_t offset,    // Source address = [source] + [offset]
-    uint32_t* destination)
+  struct pcb_t *proc, // Process executing the instruction
+  uint32_t source,    // Index of source register
+  uint32_t offset,    // Source address = [source] + [offset]
+  uint32_t* destination)
 {
-  BYTE data;
-  int val = __read(proc, 0, source, offset, &data);
+BYTE data;
+int val = __read(proc, 0, source, offset, &data);
 
-  /* TODO update result of reading action*/
-  *destination = data;
+/* TODO update result of reading action*/
+*destination = data;
+
+printf("===== PHYSICAL MEMORY AFTER READING =====\n");
 #ifdef IODUMP
-  printf("read region=%d offset=%d value=%d\n", source, offset, data);
+printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); //print max TBL
+print_pgtbl(proc, 0, -1); //print max TBL
 #endif
-  MEMPHY_dump(proc->mram);
+MEMPHY_dump(proc->mram);
+for (int i = 0; i < PAGING_MAX_PGN; ++i) {
+  if (PAGING_PAGE_PRESENT(proc->mm->pgd[i])){
+    printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
+  }
+}
+printf("============================================\n");
 #endif
 
-  return val;
+return val;
 }
 
 /*__write - write a region memory
@@ -657,21 +683,30 @@ int __write(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE value)
 
 /*libwrite - PAGING-based write a region memory */
 int libwrite(
-    struct pcb_t *proc,   // Process executing the instruction
-    BYTE data,            // Data to be wrttien into memory
-    uint32_t destination, // Index of destination register
-    uint32_t offset)
+  struct pcb_t *proc,   // Process executing the instruction
+  BYTE data,            // Data to be wrttien into memory
+  uint32_t destination, // Index of destination register
+  uint32_t offset)
 {
-  int val = __write(proc, 0, destination, offset, data);
+int val = __write(proc, 0, destination, offset, data);
 #ifdef IODUMP
-  printf("write region=%d offset=%d value=%d\n", destination, offset, data);
+printf("===== PHYSICAL MEMORY AFTER WRITING =====\n");
+printf("write region=%d offset=%d value=%d\n", destination, offset, data);
+
 #ifdef PAGETBL_DUMP
-  print_pgtbl(proc, 0, -1); //print max TBL
+print_pgtbl(proc, 0, -1); //print max TBL
 #endif
-  MEMPHY_dump(proc->mram);
+MEMPHY_dump(proc->mram);
+for (int i = 0; i < PAGING_MAX_PGN; ++i) {
+  if (PAGING_PAGE_PRESENT(proc->mm->pgd[i])){
+    printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
+  }
+}
+printf("============================================\n");
+
 #endif
 
-  return val;
+return val;
 }
 
 /*free_pcb_memphy - collect all memphy of pcb
@@ -823,7 +858,7 @@ int get_free_helper_best_fit(
     int s = c->rg_end - c->rg_start;
     if(s >= size) {
       int score = s - size;
-      if(score > 0 && score < bestScore || bestScore == -1) {
+      if((score > 0 && score < bestScore) || bestScore == -1) {
         bestRunner = runner;
         bestScore = score;
       }

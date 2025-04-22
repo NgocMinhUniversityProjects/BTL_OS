@@ -99,18 +99,19 @@ int inc_vma_limit(struct pcb_t *caller, int vmaid, int inc_sz)
     struct vm_area_struct* cur_vma = get_vma_by_num(caller->mm, vmaid);
     if (!cur_vma||!area) return -1;
     int old_end = cur_vma->vm_end;
-  if (validate_overlap_vm_area(caller, vmaid, area->rg_start, area->rg_end) < 0)
-    return -1;
+    if (validate_overlap_vm_area(caller, vmaid, area->rg_start, area->rg_end) < 0)
+      return -1;
+
     if (cur_vma->sbrk>cur_vma->vm_end){
-    cur_vma->vm_end+=inc_amt ;
-    struct vm_rg_struct newrg; 
-    if (vm_map_ram(caller, area->rg_start, area->rg_end,
-      old_end, incnumpage,&newrg) < 0) {
-      return -1; 
+      cur_vma->vm_end+=inc_amt ;
+      struct vm_rg_struct newrg; 
+      if (vm_map_ram(caller, area->rg_start, area->rg_end,
+        old_end, incnumpage,&newrg) < 0) {
+        return -1; 
     } 
 }
   //add it to free list so lib-mem has access to it
-  enlist_vm_rg_node(&cur_vma->vm_freerg_list,area);
+  enlist_vm_rg_node(&cur_vma->vm_freerg_list, area);
   return 0;
   
 }
