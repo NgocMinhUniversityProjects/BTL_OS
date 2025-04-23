@@ -299,6 +299,8 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   //its...someone else in the team lmao
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
   int old_sbrk = cur_vma->sbrk;
+  if (old_sbrk+size >= PAGING_MAX_PGN*PAGING_PAGESZ) 
+    return -1;
   struct sc_regs regs;
   regs.a1 =  SYSMEM_INC_OP; //memory operation
   regs.a2 = vmaid; //vmaid
@@ -316,7 +318,6 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   //since by agreement, the new freed area is enlisted again
 
   if(cur_vma->sbrk-old_sbrk != size) {
-    //stil fails to find free area after all that
     alloc_addr = NULL;
     return -1;
   };
@@ -376,6 +377,7 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
   pthread_mutex_lock(&mmvm_lock);
   int addr;
   int val = __alloc(proc, 0, reg_index, size, &addr);
+  #ifdef IODUMP 
   printf("===== PHYSICAL MEMORY AFTER ALLOCATION =======\n");
   printf("PID=%d - Region=%d - Address=%08x - Size=%d bytes\n", proc->pid, reg_index, addr, size);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
@@ -385,6 +387,7 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
     }
   }
   printf("==============================================\n");
+  #endif
   pthread_mutex_unlock(&mmvm_lock);
   /* By default using vmaid = 0 */
   return val;
@@ -401,6 +404,7 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   /* TODO Implement free region */
   pthread_mutex_lock(&mmvm_lock);
   int val = __free(proc, 0, reg_index);
+  #ifdef IODUMP
   printf("===== PHYSICAL MEMORY AFTER DEALLOCATION =====\n");
   printf("PID=%d - Region=%d\n", proc->pid, reg_index);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
@@ -410,6 +414,7 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
     }
   }
   printf("==============================================\n");
+  #endif
   pthread_mutex_unlock(&mmvm_lock);
   /* By default using vmaid = 0 */
   return val;
@@ -603,8 +608,8 @@ int val = __read(proc, 0, source, offset, &data);
 /* TODO update result of reading action*/
 *destination = data;
 
-printf("======= PHYSICAL MEMORY AFTER READING ========\n");
 #ifdef IODUMP
+printf("======= PHYSICAL MEMORY AFTER READING ========\n");
 printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
 print_pgtbl(proc, 0, -1); //print max TBL
@@ -654,7 +659,7 @@ int libwrite(
 {
   pthread_mutex_lock(&mmvm_lock);
 int val = __write(proc, 0, destination, offset, data);
-#ifdef IODUMPD
+#ifdef IODUMP
 printf("======= PHYSICAL MEMORY AFTER WRITING ========\n");
 printf("write region=%d offset=%d value=%d\n", destination, offset, data);
 
@@ -668,10 +673,10 @@ for (int i = 0; i < PAGING_MAX_PGN; ++i) {
   }
 }
 printf("==============================================\n");
-pthread_mutex_unlock(&mmvm_lock);
 
 #endif
 
+pthread_mutex_unlock(&mmvm_lock);
 return val;
 }
 
