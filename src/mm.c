@@ -104,9 +104,9 @@ int vmap_page_range(struct pcb_t *caller,           // process call
       frame_count++;
       fpit = fpit->fp_next;
   }
-  if (frame_count < pgnum) {
-      return -1; 
-  }
+  // if (frame_count < pgnum) {
+  //     return -1; 
+  // }
   // //
   // ret_rg->rg_start = addr;
   // ret_rg->rg_end = addr + pgnum * PAGING_PAGESZ;
@@ -147,7 +147,6 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
   */
   int allocated = 0;
   *frm_lst = NULL;
-  struct framephy_struct *lastfp = NULL;
   //
 
   for (pgit = 0; pgit < req_pgnum; pgit++)
@@ -161,32 +160,32 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
       //
       newfp_str->fpn = fpn;
       // implement
-      newfp_str->fp_next = NULL;
       if (*frm_lst == NULL){
         *frm_lst = newfp_str;
+        (*frm_lst)->fp_next = NULL;
       }
       else
       {
-        lastfp->fp_next = newfp_str;
+        newfp_str->fp_next =*frm_lst;
+        *frm_lst = newfp_str;
       }
-      lastfp = newfp_str;
       allocated++;
       //
 
     }
-    else
-    { // TODO: ERROR CODE of obtaining somes but not enough frames
-      struct framephy_struct *current = *frm_lst;
-      while (current != NULL) {
-          struct framephy_struct *next = current->fp_next;
-          MEMPHY_put_freefp(caller->mram, current->fpn); 
-          free(current);
-          current = next;
-      }
-      if (allocated > 0) return -1;
-      else return -3000;
-      //
-    }
+    else break;
+    // { // TODO: ERROR CODE of obtaining somes but not enough frames
+    //   struct framephy_struct *current = *frm_lst;
+    //   while (current != NULL) {
+    //       struct framephy_struct *next = current->fp_next;
+    //       MEMPHY_put_freefp(caller->mram, current->fpn); 
+    //       free(current);
+    //       current = next;
+    //   }
+    //   if (allocated > 0) return -1;
+    //   else return -3000;
+    //   //
+    // }
   }
 
   return 0;
@@ -250,9 +249,12 @@ int __swap_cp_page(struct memphy_struct *mpsrc, int srcfpn,
     addrsrc = srcfpn * PAGING_PAGESZ + cellidx;
     addrdst = dstfpn * PAGING_PAGESZ + cellidx;
 
-    BYTE data;
-    MEMPHY_read(mpsrc, addrsrc, &data);
-    MEMPHY_write(mpdst, addrdst, data);
+    BYTE datasrc;
+    BYTE datadst;
+    MEMPHY_read(mpsrc, addrsrc, &datasrc);
+    MEMPHY_read(mpdst, addrdst, &datadst);
+    MEMPHY_write(mpsrc, addrsrc, datadst);
+    MEMPHY_write(mpdst, addrdst, datasrc);
   }
 
   return 0;
