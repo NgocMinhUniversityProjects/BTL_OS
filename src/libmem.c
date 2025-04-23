@@ -215,6 +215,7 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
     }
   runner = &(*runner)->rg_next;
   }
+  return 0;
 } 
 
 /*get_symrg_byid - get mem region by region ID
@@ -351,10 +352,10 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
 
-  if(rgnode->rg_start >= rgnode->rg_end)
+  if(rgnode->rg_start >= rgnode->rg_end) {
     pthread_mutex_unlock(&mmvm_lock);
     return -1; //invalid region, avoid double free
-  
+  }
   //hard copy to a new struct
   struct vm_rg_struct * newEmptyrg = malloc(sizeof(struct vm_rg_struct));
   newEmptyrg->rg_start = rgnode->rg_start;
@@ -383,8 +384,8 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
   /* TODO Implement allocation on vm area 0 */
   int addr;
   int val = __alloc(proc, 0, reg_index, size, &addr);
-
-  printf("===== PHYSICAL MEMORY AFTER ALLOCATION =====\n");
+  pthread_mutex_lock(&mmvm_lock);
+  printf("===== PHYSICAL MEMORY AFTER ALLOCATION =======\n");
   printf("PID=%d - Region=%d - Address=%08x - Size=%d bytes\n", proc->pid, reg_index, addr, size);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
   for (int i = 0; i < PAGING_MAX_PGN; ++i) {
@@ -392,7 +393,8 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
       printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
     }
   }
-  printf("============================================\n");
+  printf("==============================================\n");
+  pthread_mutex_unlock(&mmvm_lock);
   /* By default using vmaid = 0 */
   return val;
 }
@@ -407,7 +409,9 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
 {
   /* TODO Implement free region */
   int val = __free(proc, 0, reg_index);
+  pthread_mutex_lock(&mmvm_lock);
   printf("===== PHYSICAL MEMORY AFTER DEALLOCATION =====\n");
+  printf("PID=%d - Region=%d\n", proc->pid, reg_index);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
   for (int i = 0; i < PAGING_MAX_PGN; ++i) {
     if (PAGING_PAGE_PRESENT(proc->mm->pgd[i])){
@@ -415,6 +419,7 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
     }
   }
   printf("==============================================\n");
+  pthread_mutex_unlock(&mmvm_lock);
   /* By default using vmaid = 0 */
   return val;
 }
@@ -626,7 +631,7 @@ int val = __read(proc, 0, source, offset, &data);
 /* TODO update result of reading action*/
 *destination = data;
 
-printf("===== PHYSICAL MEMORY AFTER READING =====\n");
+printf("======= PHYSICAL MEMORY AFTER READING ========\n");
 #ifdef IODUMP
 printf("read region=%d offset=%d value=%d\n", source, offset, data);
 #ifdef PAGETBL_DUMP
@@ -638,7 +643,7 @@ for (int i = 0; i < PAGING_MAX_PGN; ++i) {
     printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
   }
 }
-printf("============================================\n");
+printf("==============================================\n");
 #endif
 
 return val;
@@ -677,7 +682,8 @@ int libwrite(
 {
 int val = __write(proc, 0, destination, offset, data);
 #ifdef IODUMP
-printf("===== PHYSICAL MEMORY AFTER WRITING =====\n");
+pthread_mutex_lock(&mmvm_lock);
+printf("======= PHYSICAL MEMORY AFTER WRITING ========\n");
 printf("write region=%d offset=%d value=%d\n", destination, offset, data);
 
 #ifdef PAGETBL_DUMP
@@ -689,7 +695,8 @@ for (int i = 0; i < PAGING_MAX_PGN; ++i) {
     printf("Page Number: %d -> Frame Number : %d\n", i, PAGING_FPN(proc->mm->pgd[i]));
   }
 }
-printf("============================================\n");
+printf("==============================================\n");
+pthread_mutex_unlock(&mmvm_lock);
 
 #endif
 
