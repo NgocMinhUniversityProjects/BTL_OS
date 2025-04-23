@@ -225,7 +225,7 @@ int enlist_vm_freerg_list(struct mm_struct *mm, struct vm_rg_struct *rg_elmt)
  */
 struct vm_rg_struct *get_symrg_byid(struct mm_struct *mm, int rgid)
 {
-  if (rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  if (rgid < 0 || rgid >= PAGING_MAX_SYMTBL_SZ)
     return NULL;
 
   return &mm->symrgtbl[rgid];
@@ -256,16 +256,16 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
 
   /*Allocate at the toproof */
   struct vm_rg_struct rgnode;
-
+  struct vm_rg_struct * allocrg = get_symrg_byid(caller->mm, rgid);
   /* commit the vmaid */
   //convert the vmaid into mem area
   //vmaid is the id
-
+  if (allocrg == NULL||allocrg->rg_start!=allocrg->rg_end) return -1;
   pthread_mutex_lock(&mmvm_lock);
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
   {
-    caller->mm->symrgtbl[rgid].rg_start = rgnode.rg_start;
-    caller->mm->symrgtbl[rgid].rg_end = rgnode.rg_end;
+    allocrg->rg_start = rgnode.rg_start;
+    allocrg->rg_end = rgnode.rg_end;
  
     *alloc_addr = rgnode.rg_start;
 
@@ -324,8 +324,8 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
     pthread_mutex_unlock(&mmvm_lock);
     return -1;
   };
-  caller->mm->symrgtbl[rgid].rg_start =old_sbrk;
-  caller->mm->symrgtbl[rgid].rg_end = cur_vma->sbrk;
+  allocrg->rg_start =old_sbrk;
+  allocrg->rg_end = cur_vma->sbrk;
   *alloc_addr = old_sbrk;
   pthread_mutex_unlock(&mmvm_lock);
   return 0;
@@ -343,16 +343,15 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   // struct vm_rg_struct rgnode;
   // the manipulation of rgid later
 
-  if(rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
-    return -1;
+  // if(rgid < 0 || rgid > PAGING_MAX_SYMTBL_SZ)
+  //   return -1;
 
     
     /* Manage the collect freed region to freerg_list */
     
   pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
-
-  if(rgnode->rg_start >= rgnode->rg_end) {
+  if(!rgnode||rgnode->rg_start >= rgnode->rg_end) {
     pthread_mutex_unlock(&mmvm_lock);
     return -1; //invalid region, avoid double free
   }
@@ -440,24 +439,23 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
   uint32_t pte = mm->pgd[pgn];
   
-  if (!PAGING_PAGE_PRESENT(pte))
+  if (!PAGING_PAGE_PRESENT(pte)||(pte & PAGING_PTE_SWAPPED_MASK))
   { /* Page is not online, make it actively living */
     int status;
 
 
     //we assume if not in ram = in swap
-    int victim_pgn, free_fpn_in_active_swap; 
+    int victim_pgn; 
     /* TODO: Play with your paging theory here */
     /* Find victim page */
     status = find_victim_page(caller->mm, &victim_pgn);
     if(status != 0) return status;
     
     int victim_fpn = PAGING_PTE_FPN(mm->pgd[victim_pgn]);
-    int target_fpn = PAGING_PTE_SWP(pte);//the target frame storing our variable
-    
+    int target_fpn ;//= PAGING_PTE_SWP(pte);//the target frame storing our variable
+    if(PAGING_PAGE_PRESENT(pte)) target_fpn = PAGING_PTE_SWP(pte);
+    else MEMPHY_get_freefp(caller->active_mswp,&target_fpn);
     /* Get free frame in MEMSWP */
-    status = MEMPHY_get_freefp(caller->active_mswp, &free_fpn_in_active_swap);
-    if(status != 0) return status;
 
     /* TODO: Implement swap frame from MEMRAM to MEMSWP and vice versa*/
 
@@ -468,16 +466,9 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     
     struct sc_regs regs;
     regs.a1 = SYSMEM_SWP_OP;
-    regs.a2 = victim_fpn;
-    regs.a3 = free_fpn_in_active_swap;
-    
-    // /* SYSCALL 17 sys_memmap */
-    status = syscall(caller, 17, &regs);
-    if (status != 0) return status;
-    
     // target -> victim 
-    regs.a2 = target_fpn;
-    regs.a3 = victim_fpn;
+    regs.a2 = victim_fpn;
+    regs.a3 = target_fpn;
 
     /* SYSCALL 17 sys_memmap */
     status = syscall(caller, 17, &regs);
@@ -493,16 +484,12 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
     //swap type is unmentioned
     //but i presumed its the id of the active swap device
     //its unused anyway
-    pte_set_swap(&mm->pgd[victim_pgn], caller->active_mswp_id, free_fpn_in_active_swap);
+    pte_set_swap(&mm->pgd[victim_pgn], 0, target_fpn);
 
     // - Add to the fifo queue
     enlist_pgn_node(&caller->mm->fifo_pgn, pgn);
 
-    //enlist the free of the target's old frames into the current active mem swap device
-    MEMPHY_put_freefp(caller->active_mswp, target_fpn);
 
-    *fpn = victim_fpn;
-    return 0;
   }
 
   *fpn = PAGING_FPN(mm->pgd[pgn]);
@@ -610,7 +597,7 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE *data)
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
     return -1;
 
-  if(currg->rg_start >= currg->rg_end)
+  if(currg->rg_start  + offset >= currg->rg_end)
     return -1; //invalid or freed region, disallow read
 
   pg_getval(caller->mm, currg->rg_start + offset, data, caller);
@@ -665,7 +652,7 @@ int __write(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE value)
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
     return -1;
 
-  if(currg->rg_start >= currg->rg_end)
+  if(currg->rg_start  + offset >= currg->rg_end)
     return -1; //invalid or freed region, disallow write
 
   pg_setval(caller->mm, currg->rg_start + offset, value, caller);
@@ -722,11 +709,13 @@ int free_pcb_memph(struct pcb_t *caller)
     //why the ! exist ?
     if (PAGING_PAGE_PRESENT(pte))
     {
+      if (pte & PAGING_PTE_SWAPPED_MASK){
+        fpn = PAGING_PTE_SWP(pte);
+        MEMPHY_put_freefp(caller->active_mswp, fpn);    
+      }else{
       fpn = PAGING_PTE_FPN(pte);
       MEMPHY_put_freefp(caller->mram, fpn);
-    } else {
-      fpn = PAGING_PTE_SWP(pte);
-      MEMPHY_put_freefp(caller->active_mswp, fpn);    
+      }
     }
   }
 
@@ -802,41 +791,41 @@ int get_free_vmrg_area(struct pcb_t *caller, int vmaid, int size, struct vm_rg_s
 // 2 = B -> A
 // -1 = at least 1 region ptr is NULL
 //assumtion: region is correct and end > start 
-int get_order_between_2_regions(struct vm_rg_struct * A, struct vm_rg_struct * B){
-  if(A == NULL || B == NULL) return -1;
-  if(A->rg_end < B->rg_start) return 1;
-  if(A->rg_start > B->rg_end) return 2;
-  return 0;
-}
+// int get_order_between_2_regions(struct vm_rg_struct * A, struct vm_rg_struct * B){
+//   if(A == NULL || B == NULL) return -1;
+//   if(A->rg_end < B->rg_start) return 1;
+//   if(A->rg_start > B->rg_end) return 2;
+//   return 0;
+// }
 
 //unused, implemneted as a study case
-int get_free_helper_first_fit(
-  struct vm_rg_struct ** runner, 
-  int size, struct 
-  vm_rg_struct *target
-){
-  if(runner == NULL || *runner == NULL) return -1;
-  while(*runner){
-    //first fit algo
-    struct vm_rg_struct * c = *runner;
-    int s = c->rg_end - c->rg_start + 1;
-    if(s >= size){
-      target->rg_start = c->rg_start;
-      target->rg_end = target->rg_start + size;
-      //remove from free list
-      c->rg_start = c->rg_end + 1;
-      if(c->rg_start > c->rg_end){
-        //cut (c) out of list
-        struct vm_rg_struct * d = c->rg_next;
-        free(c); //calling free is safe since c is on the heap
-        *runner = d;
-        return 0;
-      }
-    }
-    runner = &((*runner)->rg_next);
-  }
-  return -1;
-}
+// int get_free_helper_first_fit(
+//   struct vm_rg_struct ** runner, 
+//   int size, struct 
+//   vm_rg_struct *target
+// ){
+//   if(runner == NULL || *runner == NULL) return -1;
+//   while(*runner){
+//     //first fit algo
+//     struct vm_rg_struct * c = *runner;
+//     int s = c->rg_end - c->rg_start + 1;
+//     if(s >= size){
+//       target->rg_start = c->rg_start;
+//       target->rg_end = target->rg_start + size;
+//       //remove from free list
+//       c->rg_start = c->rg_end + 1;
+//       if(c->rg_start > c->rg_end){
+//         //cut (c) out of list
+//         struct vm_rg_struct * d = c->rg_next;
+//         free(c); //calling free is safe since c is on the heap
+//         *runner = d;
+//         return 0;
+//       }
+//     }
+//     runner = &((*runner)->rg_next);
+//   }
+//   return -1;
+// }
 
 int get_free_helper_best_fit(
   struct vm_rg_struct ** runner, 
