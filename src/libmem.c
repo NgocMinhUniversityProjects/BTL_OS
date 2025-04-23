@@ -261,7 +261,6 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   //convert the vmaid into mem area
   //vmaid is the id
   if (allocrg == NULL||allocrg->rg_start!=allocrg->rg_end) return -1;
-  pthread_mutex_lock(&mmvm_lock);
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
   {
     allocrg->rg_start = rgnode.rg_start;
@@ -269,7 +268,6 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
  
     *alloc_addr = rgnode.rg_start;
 
-    pthread_mutex_unlock(&mmvm_lock);
     return 0;
   }
 
@@ -309,7 +307,6 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   int status = syscall(caller, 17, &regs); 
   if(status != 0) {
     alloc_addr = NULL;
-    pthread_mutex_unlock(&mmvm_lock);
     return status;
   }
   /* commit the limit increment */
@@ -321,13 +318,11 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   if(cur_vma->sbrk-old_sbrk != size) {
     //stil fails to find free area after all that
     alloc_addr = NULL;
-    pthread_mutex_unlock(&mmvm_lock);
     return -1;
   };
   allocrg->rg_start =old_sbrk;
   allocrg->rg_end = cur_vma->sbrk;
   *alloc_addr = old_sbrk;
-  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -349,10 +344,8 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
     
     /* Manage the collect freed region to freerg_list */
     
-  pthread_mutex_lock(&mmvm_lock);
   struct vm_rg_struct * rgnode = get_symrg_byid(caller->mm, rgid);
   if(!rgnode||rgnode->rg_start >= rgnode->rg_end) {
-    pthread_mutex_unlock(&mmvm_lock);
     return -1; //invalid region, avoid double free
   }
   //hard copy to a new struct
@@ -368,7 +361,6 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
   rgnode->rg_start = 0;
   rgnode->rg_next = NULL;
 
-  pthread_mutex_unlock(&mmvm_lock);
 
   return 0;
 }
@@ -381,9 +373,9 @@ int __free(struct pcb_t *caller, int vmaid, int rgid)
 int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
 {
   /* TODO Implement allocation on vm area 0 */
+  pthread_mutex_lock(&mmvm_lock);
   int addr;
   int val = __alloc(proc, 0, reg_index, size, &addr);
-  pthread_mutex_lock(&mmvm_lock);
   printf("===== PHYSICAL MEMORY AFTER ALLOCATION =======\n");
   printf("PID=%d - Region=%d - Address=%08x - Size=%d bytes\n", proc->pid, reg_index, addr, size);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
@@ -407,8 +399,8 @@ int liballoc(struct pcb_t *proc, uint32_t size, uint32_t reg_index)
 int libfree(struct pcb_t *proc, uint32_t reg_index)
 {
   /* TODO Implement free region */
-  int val = __free(proc, 0, reg_index);
   pthread_mutex_lock(&mmvm_lock);
+  int val = __free(proc, 0, reg_index);
   printf("===== PHYSICAL MEMORY AFTER DEALLOCATION =====\n");
   printf("PID=%d - Region=%d\n", proc->pid, reg_index);
   print_pgtbl(proc, 0, proc->mm->mmap->vm_end);
@@ -504,7 +496,6 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
  */
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
-  pthread_mutex_lock(&mmvm_lock);
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
   int fpn;
@@ -512,7 +503,6 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
   /* Get the page to MEMRAM, swap from MEMSWAP if needed */
   if (pg_getpage(mm, pgn, &fpn, caller) != 0) {
     data = NULL;
-    pthread_mutex_unlock(&mmvm_lock); 
     return -1; /* invalid page access */
   }
 
@@ -530,13 +520,11 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
   int status = syscall(caller, 17, &regs); //pass in caller, caller->mram is called sys_mem.c already
   if(status != 0){
     data = NULL;
-    pthread_mutex_unlock(&mmvm_lock); 
     return -1;
   }
 
   // Update data
   *data = regs.a3;
-  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -548,14 +536,12 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
  */
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
-  pthread_mutex_lock(&mmvm_lock);
   int pgn = PAGING_PGN(addr);
   int off = PAGING_OFFST(addr);
   int fpn;
 
   /* Get the page to MEMRAM, swap from MEMSWAP if needed */
   if (pg_getpage(mm, pgn, &fpn, caller) != 0){
-    pthread_mutex_unlock(&mmvm_lock);
     return -1; /* invalid page access */
   }
 
@@ -574,10 +560,8 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
   /* SYSCALL 17 sys_memmap */
   int status = syscall(caller, 17, &regs);
   if(status != 0){
-    pthread_mutex_unlock(&mmvm_lock); 
     return -1;
   }
-  pthread_mutex_unlock(&mmvm_lock);
   return 0;
 }
 
@@ -612,6 +596,7 @@ int libread(
   uint32_t offset,    // Source address = [source] + [offset]
   uint32_t* destination)
 {
+  pthread_mutex_lock(&mmvm_lock);
 BYTE data;
 int val = __read(proc, 0, source, offset, &data);
 
@@ -632,7 +617,7 @@ for (int i = 0; i < PAGING_MAX_PGN; ++i) {
 }
 printf("==============================================\n");
 #endif
-
+  pthread_mutex_unlock(&mmvm_lock);
 return val;
 }
 
@@ -667,9 +652,9 @@ int libwrite(
   uint32_t destination, // Index of destination register
   uint32_t offset)
 {
+  pthread_mutex_lock(&mmvm_lock);
 int val = __write(proc, 0, destination, offset, data);
-#ifdef IODUMP
-pthread_mutex_lock(&mmvm_lock);
+#ifdef IODUMPD
 printf("======= PHYSICAL MEMORY AFTER WRITING ========\n");
 printf("write region=%d offset=%d value=%d\n", destination, offset, data);
 
