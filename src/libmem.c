@@ -260,7 +260,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   /* commit the vmaid */
   //convert the vmaid into mem area
   //vmaid is the id
-  if (allocrg == NULL||allocrg->rg_start!=allocrg->rg_end) return -1;
+  if (allocrg == NULL||allocrg->rg_start!=allocrg->rg_end||size<=0) return -1;
   if (get_free_vmrg_area(caller, vmaid, size, &rgnode) == 0)
   {
     allocrg->rg_start = rgnode.rg_start;
@@ -308,6 +308,7 @@ int __alloc(struct pcb_t *caller, int vmaid, int rgid, int size, int *alloc_addr
   // SYSCALL 17 sys_memmap
   int status = syscall(caller, 17, &regs); 
   if(status != 0) {
+    cur_vma->sbrk = old_sbrk;
     alloc_addr = NULL;
     return status;
   }
@@ -586,7 +587,7 @@ int __read(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE *data)
   if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
     return -1;
 
-  if(currg->rg_start  + offset >= currg->rg_end)
+  if(currg->rg_start  + offset >= currg->rg_end||offset<0)
     return -1; //invalid or freed region, disallow read
 
   pg_getval(caller->mm, currg->rg_start + offset, data, caller);
@@ -639,7 +640,7 @@ int __write(struct pcb_t *caller, int vmaid, int rgid, int offset, BYTE value)
   struct vm_rg_struct *currg = get_symrg_byid(caller->mm, rgid);
   struct vm_area_struct *cur_vma = get_vma_by_num(caller->mm, vmaid);
 
-  if (currg == NULL || cur_vma == NULL) /* Invalid memory identify */
+  if (currg == NULL || cur_vma == NULL||offset<0) /* Invalid memory identify */
     return -1;
 
   if(currg->rg_start  + offset >= currg->rg_end)
