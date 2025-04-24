@@ -173,7 +173,7 @@ int alloc_pages_range(struct pcb_t *caller, int req_pgnum, struct framephy_struc
       //
 
     }
-    else break;
+    else return -1;
     // { // TODO: ERROR CODE of obtaining somes but not enough frames
     //   struct framephy_struct *current = *frm_lst;
     //   while (current != NULL) {
@@ -214,9 +214,11 @@ int vm_map_ram(struct pcb_t *caller, int astart, int aend, int mapstart, int inc
    */
   ret_alloc = alloc_pages_range(caller, incpgnum, &frm_lst);
 
-  if (ret_alloc < 0 && ret_alloc != -3000)
-    return -1;
-
+  if (ret_alloc < 0 && ret_alloc != -3000){
+     if(caller->mm->fifo_pgn ==NULL){
+      return -1;
+    }
+  }
   /* Out of memory */
   if (ret_alloc == -3000)
   {
