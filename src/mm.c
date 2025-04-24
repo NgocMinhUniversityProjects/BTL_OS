@@ -98,12 +98,12 @@ int vmap_page_range(struct pcb_t *caller,           // process call
   */
 
   // check enough frame?
-  int frame_count = 0;
+  // int frame_count = 0;
   struct framephy_struct *fpit = frames;
-  while (fpit != NULL) {
-      frame_count++;
-      fpit = fpit->fp_next;
-  }
+  // while (fpit != NULL) {
+  //     frame_count++;
+  //     fpit = fpit->fp_next;
+  // }
   // if (frame_count < pgnum) {
   //     return -1; 
   // }
@@ -116,7 +116,7 @@ int vmap_page_range(struct pcb_t *caller,           // process call
    *      [addr to addr + pgnum*PAGING_PAGESZ
    *      in page table caller->mm->pgd[]
    */
-  fpit = frames;
+  // fpit = frames;
   for (pgit = 0; pgit < pgnum && fpit != NULL; pgit++, fpit = fpit->fp_next ){
     pte_set_fpn(&caller->mm->pgd[pgn + pgit], fpit->fpn);
     enlist_pgn_node(&caller->mm->fifo_pgn, pgn + pgit);
