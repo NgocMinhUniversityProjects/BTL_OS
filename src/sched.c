@@ -31,6 +31,8 @@ void init_scheduler(void) {
 
 	for (i = 0; i < MAX_PRIO; i ++) {
 		mlq_ready_queue[i].size = 0;
+		mlq_ready_queue[i].front = 0;
+		mlq_ready_queue[i].rear = 0;
 		slot[i] = MAX_PRIO - i; 
 	}
 #endif
