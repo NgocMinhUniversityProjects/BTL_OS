@@ -30,8 +30,9 @@ int __sys_memmap(struct pcb_t *caller, struct sc_regs* regs)
    return  __mm_swap_page(caller, regs->a2, regs->a3);
             break;
    case SYSMEM_IO_READ:
-   return  MEMPHY_read(caller->mram, regs->a2, &value);
+   int status = MEMPHY_read(caller->mram, regs->a2, &value);
             regs->a3 = value;
+   return status;
             break;
    case SYSMEM_IO_WRITE:
    return MEMPHY_write(caller->mram, regs->a2, regs->a3);
