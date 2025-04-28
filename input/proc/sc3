@@ -1,2 +1,5 @@
-20 1
-syscall 440 1
+20 3
+alloc 4 0
+syscall 440 0 0 234655
+syscall 441 0 0 
+
