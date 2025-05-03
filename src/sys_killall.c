@@ -45,7 +45,7 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
     // running list
     for (int i = 0; i < caller->running_list->size; ++i) {
         struct pcb_t *pcb = dequeue(caller->running_list);
-        if (strcmp(pcb->path, proc_name) == 0) {
+        if (strcmp(pcb->path+11, proc_name) == 0) {
             //printf("Terminating running process: %s (PID: %d)\n", pcb->path, pcb->pid);
             free_pcb_memph(pcb);
             killed++;
@@ -57,7 +57,7 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
     // mlq ready queue
     for (int i = 0; i < caller->mlq_ready_queue->size; ++i) {
         struct pcb_t *pcb = dequeue(caller->mlq_ready_queue);
-        if (strcmp(pcb->path, proc_name) == 0) {
+        if (strcmp(pcb->path+11, proc_name) == 0) {
             //printf("Terminating queued process: %s (PID: %d)\n", pcb->path, pcb->pid);
             free_pcb_memph(pcb);
             killed++;
