@@ -31,6 +31,8 @@ void init_scheduler(void) {
 
 	for (i = 0; i < MAX_PRIO; i ++) {
 		mlq_ready_queue[i].size = 0;
+		mlq_ready_queue[i].front = 0;
+		mlq_ready_queue[i].rear = 0;
 		slot[i] = MAX_PRIO - i; 
 	}
 #endif
@@ -46,7 +48,7 @@ void init_scheduler(void) {
  *  We implement stateful here using transition technique
  *  State representation   prio = 0 .. MAX_PRIO, curr_slot = 0..(MAX_PRIO - prio)
  */
-struct pcb_t * get_mlq_proc(void) {
+struct pcb_t * get_mlq_proc(int time_slot, int *curr_slot) {
 	struct pcb_t * proc = NULL;
 	/*TODO: get a process from PRIORITY [ready_queue].
 	 * Remember to use lock to protect the queue.
@@ -57,16 +59,19 @@ struct pcb_t * get_mlq_proc(void) {
 			continue;
 		}
 		proc = dequeue(&mlq_ready_queue[i]);
-		slot[i]--;
+		*curr_slot = ((time_slot < slot[i]) ? time_slot : slot[i]);
+		slot[i] -= *curr_slot;
 		break;
 	}
 	if (proc == NULL) {
 		int found = 0;
 		for (int i = 0; i < MAX_PRIO; ++i) {
-			slot[i] = MAX_PRIO - i;
+			if (!empty(&mlq_ready_queue[i])) slot[i] = MAX_PRIO - i;
 			if (!empty(&mlq_ready_queue[i]) && found == 0) {
 				proc = dequeue(&mlq_ready_queue[i]);
 				found = 1;
+				*curr_slot = ((time_slot < slot[i]) ? time_slot : slot[i]);
+				slot[i] -= *curr_slot;
 			}
 		}
 	}
@@ -86,8 +91,8 @@ void add_mlq_proc(struct pcb_t * proc) {
 	pthread_mutex_unlock(&queue_lock);	
 }
 
-struct pcb_t * get_proc(void) {
-	return get_mlq_proc();
+struct pcb_t * get_proc(int time_slot, int *curr_slot) {
+	return get_mlq_proc(time_slot, curr_slot);
 }
 
 void put_proc(struct pcb_t * proc) {
