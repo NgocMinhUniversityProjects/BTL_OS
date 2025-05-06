@@ -34,49 +34,43 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
         i++;
     }
     printf("The procname retrieved from memregionid %d is \"%s\"\n", memrg, proc_name);
-
     /* TODO: Traverse proclist to terminate the proc
      *       stcmp to check the process match proc_name
      */
     //caller->running_list
     //caller->mlq_ready_queu
-
     int killed = 0;
     // running list
     for (int i = 0; i < caller->running_list->size; ++i) {
         struct pcb_t *pcb = dequeue(caller->running_list);
         if (strcmp(pcb->path+11, proc_name) == 0) {
-            //printf("Terminating running process: %s (PID: %d)\n", pcb->path, pcb->pid);
+            printf("Terminating running process: %s (PID: %d)\n", pcb->path, pcb->pid);
             free_pcb_memph(pcb);
             killed++;
         } else {
             enqueue(caller->running_list, pcb);
         }
     }
-
+#ifdef MLQ_SCHED
     // mlq ready queue
-    for (int i = 0; i < caller->mlq_ready_queue->size; ++i) {
-        struct pcb_t *pcb = dequeue(caller->mlq_ready_queue);
-        if (strcmp(pcb->path+11, proc_name) == 0) {
-            //printf("Terminating queued process: %s (PID: %d)\n", pcb->path, pcb->pid);
-            free_pcb_memph(pcb);
-            killed++;
-        } else {
-            enqueue(caller->mlq_ready_queue, pcb);
+    for (int q = 0; q < MAX_PRIO; ++q){
+        for (int i = 0; i < caller->mlq_ready_queue[q].size; ++i) {
+            struct pcb_t *pcb = dequeue(&caller->mlq_ready_queue[q]);
+            if (strcmp(pcb->path+11, proc_name) == 0) {
+                printf("Terminating queued process: %s (PID: %d)\n", pcb->path, pcb->pid);
+                free_pcb_memph(pcb);
+                killed++;
+            } else {
+                enqueue(&caller->mlq_ready_queue[q], pcb);
+            }
         }
     }
-
+#endif
     //printf("Killed %d processes with name \"%s\"\n", killed, proc_name);
     //
     return killed > 0 ? 0 : -1;
-
     /* TODO Maching and terminating 
      *       all processes with given
      *        name in var proc_name
      */
-
-     //
-
-    
-    //return 0; 
 }
