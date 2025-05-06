@@ -44,6 +44,7 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
     for (int i = 0; i < caller->running_list->size; ++i) {
         struct pcb_t *pcb = dequeue(caller->running_list);
         if (strcmp(pcb->path+11, proc_name) == 0) {
+            pcb->pc = pcb->code->size
             printf("Terminating running process: %s (PID: %d)\n", pcb->path, pcb->pid);
             free_pcb_memph(pcb);
             killed++;
