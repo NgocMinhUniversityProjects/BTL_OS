@@ -58,6 +58,8 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
             struct pcb_t *pcb = dequeue(&caller->mlq_ready_queue[q]);
             if (strcmp(pcb->path+11, proc_name) == 0) {
                 printf("Terminating queued process: %s (PID: %d)\n", pcb->path, pcb->pid);
+                free_pcb_memph(pcb);
+                killed++;
             } else {
                 enqueue(&caller->mlq_ready_queue[q], pcb);
             }
@@ -68,7 +70,7 @@ int __sys_killall(struct pcb_t *caller, struct sc_regs* regs)
     //
     return killed > 0 ? 0 : -1;
     /* TODO Maching and terminating 
-    *       all processes with given
-    *        name in var proc_name
-    */
+     *       all processes with given
+     *        name in var proc_name
+     */
 }
